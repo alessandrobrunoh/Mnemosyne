@@ -1,0 +1,14 @@
+[package]
+name = "mnem-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mnem-core.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+syntect.workspace = true
+similar.workspace = true
+tokio.workspace = true

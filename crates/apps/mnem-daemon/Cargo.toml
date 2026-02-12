@@ -1,0 +1,35 @@
+[package]
+name = "mnem-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "mnem_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mnem-daemon"
+path = "src/main.rs"
+
+[dependencies]
+mnem-core.workspace = true
+notify.workspace = true
+ignore.workspace = true
+tokio.workspace = true
+rayon.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+content_inspector.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+log.workspace = true
+
+flexi_logger.workspace = true
+env_logger.workspace = true
+dirs.workspace = true
+libc = "0.2"
+windows-sys.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

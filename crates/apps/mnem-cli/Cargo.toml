@@ -1,0 +1,26 @@
+[package]
+name = "mnem-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "mnem"
+path = "src/main.rs"
+
+[dependencies]
+mnem-core.workspace = true
+mnem-tui.workspace = true
+mnem-daemon.workspace = true
+anyhow.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+syntect.workspace = true
+similar.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+libc = "0.2"
+windows-sys.workspace = true
+tree-sitter-highlight = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-ruby = { workspace = true }

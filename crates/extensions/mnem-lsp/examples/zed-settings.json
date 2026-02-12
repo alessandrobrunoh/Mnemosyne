@@ -1,0 +1,167 @@
+{
+  "// =====================================================": "",
+  "// Mnemosyne LSP Configuration for Zed IDE": "",
+  "// =====================================================": "",
+  "// This configuration enables historical code navigation and hover information": "",
+  "// powered by Mnemosyne's semantic analysis capabilities": "",
+
+  "languages": {
+    "// =====================================================": "",
+    "// Language-specific configuration": "",
+    "// Add 'mnem-lsp' to your existing language servers": "",
+    "// =====================================================": "",
+
+    "Rust": {
+      "language_servers": ["rust-analyzer", "mnem-lsp"],
+      "// note": "Keep rust-analyzer as primary, mnem-lsp adds historical features"
+    },
+
+    "Python": {
+      "language_servers": ["pylsp", "mnem-lsp"],
+      "// alternative": "Can also use 'pyright' or 'pylyzer' instead of 'pylsp'"
+    },
+
+    "TypeScript": {
+      "language_servers": ["typescript-language-server", "mnem-lsp"]
+    },
+
+    "JavaScript": {
+      "language_servers": ["typescript-language-server", "mnem-lsp"]
+    },
+
+    "Go": {
+      "language_servers": ["gopls", "mnem-lsp"]
+    },
+
+    "Java": {
+      "language_servers": ["jdtls", "mnem-lsp"]
+    },
+
+    "C": {
+      "language_servers": ["clangd", "mnem-lsp"]
+    },
+
+    "C++": {
+      "language_servers": ["clangd", "mnem-lsp"]
+    },
+
+    "C#": {
+      "language_servers": ["omnisharp", "mnem-lsp"]
+    },
+
+    "Ruby": {
+      "language_servers": ["ruby-lsp", "mnem-lsp"]
+    },
+
+    "PHP": {
+      "language_servers": ["intelephense", "mnem-lsp"]
+    }
+  },
+
+  "lsp": {
+    "// =====================================================": "",
+    "// Mnemosyne LSP Server Configuration": "",
+    "// =====================================================": "",
+
+    "mnem-lsp": {
+      "binary": {
+        "// macOS/Linux": "Adjust path to your installation",
+        "path": "/usr/local/bin/mnem-lsp",
+        "arguments": [],
+
+        "// environment": "Optional: set environment variables",
+        "env": {
+          "RUST_LOG": "mnem_lsp=info",
+          "// MNEMOSYNE_DB_PATH": "Custom database path (optional)"
+        }
+      },
+
+      "// initialization_options": "Optional server configuration",
+      "initialization_options": {
+        "// max_history_depth": 50,
+        "// enable_branch_filtering": true,
+        "// show_timestamps": true
+      }
+    }
+  },
+
+  "// =====================================================": "",
+  "// Alternative Paths for Different Platforms": "",
+  "// =====================================================": "",
+
+  "// Windows Example (uncomment to use)": {
+    "// lsp": {
+      "// mnem-lsp": {
+        "// binary": {
+          "// path": "C:\\Program Files\\Mnemosyne\\mnem-lsp.exe",
+          "// arguments": []
+        "// }
+      "// }
+    "// }
+  },
+
+  "// Linux (custom installation path)": {
+    "// lsp": {
+      "// mnem-lsp": {
+        "// binary": {
+          "// path": "/home/username/.local/bin/mnem-lsp",
+          "// arguments": []
+        "// }
+      "// }
+    "// }
+  },
+
+  "// macOS (Homebrew installation)": {
+    "// lsp": {
+      "// mnem-lsp": {
+        "// binary": {
+          "// path": "/opt/homebrew/bin/mnem-lsp",
+          "// arguments": []
+        "// }
+      "// }
+    "// }
+  },
+
+  "// =====================================================": "",
+  "// Development/Debug Configuration": "",
+  "// =====================================================": "",
+
+  "// For development (running from source)": {
+    "// lsp": {
+      "// mnem-lsp": {
+        "// binary": {
+          "// path": "/path/to/mnemosyne/target/debug/mnem-lsp",
+          "// arguments": [],
+          "// env": {
+            "// RUST_LOG": "mnem_lsp=debug",
+            "// MNEMOSYNE_DEBUG": "1"
+          "// }
+        "// }
+      "// }
+    "// }
+  },
+
+  "// =====================================================": "",
+  "// Usage Tips": "",
+  "// =====================================================": "",
+
+  "// Before using Mnemosyne LSP:": {
+    "// step_1": "Start Mnemosyne daemon: mnem start",
+    "// step_2": "Watch your project: cd /your/project && mnem watch",
+    "// step_3": "Verify daemon: mnem status",
+    "// step_4": "Restart Zed to pick up the new LSP server"
+  },
+
+  "// Features:": {
+    "// hover": "Shows symbol version count and last modification in current branch",
+    "// goto_definition": "Cmd+Click or F12 to navigate between historical versions",
+    "// branch_aware": "All operations respect the current Git branch context"
+  },
+
+  "// Troubleshooting:": {
+    "// no_history": "Ensure daemon is running: mnem status",
+    "// slow_performance": "Check daemon load: mnem activity",
+    "// connection_error": "Verify project is watched: mnem watch",
+    "// logs": "Open Zed log: Cmd+Shift+P -> 'zed: open log'"
+  }
+}

@@ -1,0 +1,23 @@
+id = "mnem-zed"
+name = "Mnemosyne"
+version = "0.1.0"
+schema_version = 1
+authors = ["Mnemosyne Team <team@mnemosyne.dev>"]
+description = "Intelligent local file history and semantic code navigation with Mnemosyne."
+repository = "https://github.com/yourusername/mnemosyne"
+
+[lib]
+kind = "Rust"
+
+[language_servers.mnem-lsp]
+name = "Mnemosyne LSP"
+languages = [
+    "Rust",
+    "Python",
+    "TypeScript",
+    "JavaScript",
+    "Go",
+    "C",
+    "Cpp",
+    "Java"
+]

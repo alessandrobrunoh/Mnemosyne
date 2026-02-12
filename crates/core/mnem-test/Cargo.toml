@@ -1,0 +1,11 @@
+[package]
+name = "mnem-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mnem-core.workspace = true
+mnem-daemon.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+chrono.workspace = true

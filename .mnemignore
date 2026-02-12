@@ -1,0 +1,41 @@
+# Mnemosyne Ignore File
+# Standard exclusions for development projects
+
+# Build directories
+target/
+dist/
+build/
+out/
+bin/
+obj/
+
+# Dependencies
+node_modules/
+vendor/
+packages/
+bower_components/
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Version Control
+.git/
+.svn/
+.hg/
+
+# Mnemosyne Internal
+.mnemosyne/
+mnemd.log
+mnemd.pid
+
+# Temporary files
+tmp/
+temp/
+*.log
+*.tmp
+*.bak

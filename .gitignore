@@ -1,0 +1,40 @@
+# Rust
+target/
+Cargo.lock
+
+# IDEs
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+debug/
+release/
+
+# Dependencies
+vendor/
+
+# Test coverage
+*.profraw
+
+# Benchmarks
+criterion/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# Agents Temp files
+.agents/

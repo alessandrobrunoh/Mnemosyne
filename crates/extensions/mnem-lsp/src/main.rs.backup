@@ -1,0 +1,561 @@
+use anyhow::Result;
+use async_trait::async_trait;
+use mnem_core::{
+    client::DaemonClient,
+    protocol::{methods, SymbolHistoryEntry},
+};
+use serde_json::json;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::{lsp_types::*, Client, LanguageServer, LspService, Server};
+
+// Global flag to track if daemon is available
+static DAEMON_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Backend of the LSP server managing communication with Zed
+struct Backend {
+    client: Client,
+    mnem_client: Arc<Mutex<Option<DaemonClient>>>,
+    documents: Arc<Mutex<HashMap<Url, String>>>,
+}
+
+impl Backend {
+    fn new(client: Client) -> Self {
+        Self {
+            client,
+            mnem_client: Arc::new(Mutex::new(None)),
+            documents: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Extracts the word/symbol at the given position in the document
+    async fn extract_symbol_at_position(
+        &self,
+        document_text: &str,
+        position: Position,
+    ) -> Option<String> {
+        let lines: Vec<&str> = document_text.lines().collect();
+        if position.line as usize >= lines.len() {
+            return None;
+        }
+
+        let line = lines[position.line as usize];
+        let line_chars: Vec<char> = line.chars().collect();
+
+        if position.character as usize >= line_chars.len() {
+            return None;
+        }
+
+        let mut start = position.character as usize;
+        let mut end = position.character as usize;
+
+        while start > 0 && (line_chars[start - 1].is_alphanumeric() || line_chars[start - 1] == '_')
+        {
+            start -= 1;
+        }
+
+        while end < line_chars.len()
+            && (line_chars[end].is_alphanumeric() || line_chars[end] == '_')
+        {
+            end += 1;
+        }
+
+        if start < end {
+            Some(line[start..end].to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Gets symbol history from Mnemosyne
+    async fn get_symbol_history(&self, symbol_name: &str) -> Result<Vec<SymbolHistoryEntry>> {
+        // Check if daemon is available (cached)
+        if let Some(false) = DAEMON_AVAILABLE.get() {
+            return Ok(Vec::new());
+        }
+
+        let mut client_guard = self.mnem_client.lock().await;
+
+        if client_guard.is_none() {
+            match DaemonClient::connect() {
+                Ok(c) => {
+                    *client_guard = Some(c);
+                    DAEMON_AVAILABLE.set(true).ok();
+                }
+                Err(_e) => {
+                    DAEMON_AVAILABLE.set(false).ok();
+                    return Ok(Vec::new());
+                }
+            }
+        }
+
+        if let Some(ref mut client) = *client_guard {
+            match client.call(
+                methods::SYMBOL_HISTORY,
+                json!({ "symbol_name": symbol_name }),
+            ) {
+                Ok(res) => {
+                    if let Some(history) = res.get("history") {
+                        if let Ok(entries) =
+                            serde_json::from_value::<Vec<SymbolHistoryEntry>>(history.clone())
+                        {
+                            return Ok(entries);
+                        }
+                    }
+                }
+                Err(_e) => {
+                    *client_guard = None;
+                    DAEMON_AVAILABLE.set(false).ok();
+                }
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
+    /// Gets the semantic diff between two versions of a symbol
+    async fn get_symbol_diff(
+        &self,
+        file_path: &str,
+        symbol_name: &str,
+        base_hash: Option<&str>,
+        target_hash: &str,
+    ) -> Result<Option<String>> {
+        // Skip if daemon is not available
+        if let Some(false) = DAEMON_AVAILABLE.get() {
+            return Ok(None);
+        }
+
+        let mut client_guard = self.mnem_client.lock().await;
+        if let Some(ref mut client) = *client_guard {
+            match client.call(
+                methods::SYMBOL_DIFF,
+                json!({
+                    "file_path": file_path,
+                    "symbol_name": symbol_name,
+                    "base_hash": base_hash,
+                    "target_hash": target_hash
+                }),
+            ) {
+                Ok(res) => {
+                    if let Some(diff) = res.get("diff").and_then(|d| d.as_str()) {
+                        return Ok(Some(diff.to_string()));
+                    }
+                }
+                Err(_e) => {
+                    DAEMON_AVAILABLE.set(false).ok();
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Formats history information for hover with last change diff
+    fn format_hover_content(
+        history: &[SymbolHistoryEntry],
+        symbol_name: &str,
+        current_file: &str,
+        diff: Option<String>,
+    ) -> String {
+        if history.is_empty() {
+            return format!("📜 **Mnemosyne**: No history found for `{}`", symbol_name);
+        }
+
+        let mut file_snapshots = 0;
+        let mut global_snapshots = 0;
+        let mut unique_hashes = HashSet::new();
+
+        for entry in history {
+            global_snapshots += 1;
+            if entry.snapshot.file_path == current_file {
+                file_snapshots += 1;
+                unique_hashes.insert(&entry.structural_hash);
+            }
+        }
+
+        let latest = &history[0];
+        let branch = latest.snapshot.git_branch.as_deref().unwrap_or("unknown");
+        let ts = latest
+            .snapshot
+            .timestamp
+            .split('.')
+            .next()
+            .unwrap_or(&latest.snapshot.timestamp)
+            .replace('T', " ");
+
+        let mut content = format!(
+            "📜 **Mnemosyne**: `{}`\n\n\
+            **This File**: {} snapshots ({} unique versions)\n\
+            **Global History**: {} occurrences across project\n\
+            **Context**: branch `{}`\n\
+            **Last Seen**: `{}`",
+            symbol_name,
+            file_snapshots,
+            unique_hashes.len(),
+            global_snapshots,
+            branch,
+            ts
+        );
+
+        if let Some(diff_text) = diff {
+            let trimmed = diff_text.trim();
+            if !trimmed.is_empty() {
+                content.push_str("\n\n---\n\n**Last Semantic Change**\n");
+                content.push_str("```diff\n");
+                content.push_str(trimmed);
+                content.push_str(
+                    "\n```\
+n\n",
+                );
+                content.push_str("*Tip: Use `Shift+F12` to explore global historical occurrences.");
+            }
+        }
+
+        content
+    }
+}
+
+#[async_trait]
+impl LanguageServer for Backend {
+    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
+        let capabilities = ServerCapabilities {
+            text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+            hover_provider: Some(HoverProviderCapability::Simple(true)),
+            definition_provider: Some(OneOf::Left(true)),
+            references_provider: Some(OneOf::Left(true)),
+            code_lens_provider: Some(CodeLensOptions {
+                resolve_provider: Some(false),
+            }),
+            ..ServerCapabilities::default()
+        };
+
+        Ok(InitializeResult {
+            capabilities,
+            ..InitializeResult::default()
+        })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        // Server initialized
+    }
+
+    async fn shutdown(&self) -> LspResult<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let text = params.text_document.text;
+        let mut docs = self.documents.lock().await;
+        docs.insert(uri.clone(), text);
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let mut docs = self.documents.lock().await;
+        if let Some(changes) = params.content_changes.first() {
+            docs.insert(uri.clone(), changes.text.clone());
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let mut docs = self.documents.lock().await;
+        docs.remove(&uri);
+    }
+
+    async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
+        let req = params.text_document_position_params;
+        let uri = &req.text_document.uri;
+
+        let docs = self.documents.lock().await;
+        let doc_text = match docs.get(uri) {
+            Some(text) => text.clone(),
+            None => return Ok(None),
+        };
+        drop(docs);
+
+        let symbol = match self
+            .extract_symbol_at_position(&doc_text, req.position)
+            .await
+        {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_owned()))
+            .unwrap_or_default();
+
+        let history = match self.get_symbol_history(&symbol).await {
+            Ok(h) => h,
+            Err(_) => return Ok(None),
+        };
+
+        if history.is_empty() {
+            return Ok(None);
+        }
+
+        // Fetch diff if there's a previous structural version
+        let mut diff = None;
+        if history.len() > 1 {
+            let latest_hash = &history[0].structural_hash;
+            let mut previous_hash = None;
+
+            for entry in history.iter().skip(1) {
+                if entry.structural_hash != *latest_hash {
+                    previous_hash = Some(entry.structural_hash.as_str());
+                    break;
+                }
+            }
+
+            if let Some(prev) = previous_hash {
+                if let Ok(Some(d)) = self
+                    .get_symbol_diff(&file_path, &symbol, Some(prev), latest_hash)
+                    .await
+                {
+                    diff = Some(d);
+                }
+            }
+        }
+
+        let content = Self::format_hover_content(&history, &symbol, &file_path, diff);
+
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: content,
+            }),
+            range: None,
+        }))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> LspResult<Option<GotoDefinitionResponse>> {
+        let req = params.text_document_position_params;
+        let uri = &req.text_document.uri;
+
+        let docs = self.documents.lock().await;
+        let doc_text = match docs.get(uri) {
+            Some(text) => text.clone(),
+            None => return Ok(None),
+        };
+        drop(docs);
+
+        let symbol = match self
+            .extract_symbol_at_position(&doc_text, req.position)
+            .await
+        {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_owned()))
+            .unwrap_or_default();
+
+        let history = match self.get_symbol_history(&symbol).await {
+            Ok(h) => h,
+            Err(_) => return Ok(None),
+        };
+
+        let mut locations = Vec::new();
+        let mut seen_hashes = HashSet::new();
+
+        for entry in history {
+            if entry.snapshot.file_path != file_path {
+                continue;
+            }
+
+            if !seen_hashes.insert(entry.structural_hash.clone()) {
+                continue;
+            }
+
+            if let Ok(u) = Url::parse(&format!("file://{}", entry.snapshot.file_path)) {
+                locations.push(Location {
+                    uri: u,
+                    range: Range {
+                        start: Position {
+                            line: entry.start_line.saturating_sub(1) as u32,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: entry.end_line as u32,
+                            character: 0,
+                        },
+                    },
+                });
+            }
+
+            if locations.len() >= 8 {
+                break;
+            }
+        }
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(GotoDefinitionResponse::Array(locations)))
+        }
+    }
+
+    async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
+        let req = params.text_document_position;
+        let uri = &req.text_document.uri;
+
+        let docs = self.documents.lock().await;
+        let doc_text = match docs.get(uri) {
+            Some(text) => text.clone(),
+            None => return Ok(None),
+        };
+        drop(docs);
+
+        let symbol = match self
+            .extract_symbol_at_position(&doc_text, req.position)
+            .await
+        {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let history = match self.get_symbol_history(&symbol).await {
+            Ok(h) => h,
+            Err(_) => return Ok(None),
+        };
+
+        if history.is_empty() {
+            return Ok(None);
+        }
+
+        let mut locations = Vec::new();
+        let mut seen_states = HashSet::new();
+
+        for entry in history {
+            let state_key = format!("{}:{}", entry.snapshot.file_path, entry.structural_hash);
+            if !seen_states.insert(state_key.clone()) {
+                continue;
+            }
+
+            if let Ok(u) = Url::parse(&format!("file://{}", entry.snapshot.file_path)) {
+                locations.push(Location {
+                    uri: u,
+                    range: Range {
+                        start: Position {
+                            line: entry.start_line.saturating_sub(1) as u32,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: entry.end_line as u32,
+                            character: 0,
+                        },
+                    },
+                });
+            }
+
+            if locations.len() >= 20 {
+                break;
+            }
+        }
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
+        }
+    }
+
+    async fn code_lens(&self, params: CodeLensParams) -> LspResult<Option<Vec<CodeLens>>> {
+        let uri = &params.text_document.uri;
+
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_owned()))
+            .unwrap_or_default();
+
+        if file_path.is_empty() {
+            return Ok(None);
+        }
+
+        let mut client_guard = self.mnem_client.lock().await;
+        if client_guard.is_none() {
+            match DaemonClient::connect() {
+                Ok(c) => {
+                    *client_guard = Some(c);
+                }
+                Err(_) => return Ok(None),
+            }
+        }
+
+        if let Some(ref mut client) = *client_guard {
+            match client.call(methods::FILE_INFO, json!({ "file_path": file_path })) {
+                Ok(res) => {
+                    let snapshot_count = res
+                        .get("snapshot_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let last_modified = res
+                        .get("last_modified")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+
+                    if snapshot_count == 0 {
+                        return Ok(None);
+                    }
+
+                    let time_ago = last_modified.split('T').next().unwrap_or(last_modified);
+                    let title = format!(
+                        "📜 {} versions · Last: {} (Shift+F12 on symbols)",
+                        snapshot_count, time_ago
+                    );
+
+                    let lens = CodeLens {
+                        range: Range {
+                            start: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                        command: Some(Command {
+                            title,
+                            command: String::new(),
+                            arguments: None,
+                        }),
+                        data: None,
+                    };
+
+                    return Ok(Some(vec![lens]));
+                }
+                Err(_) => {
+                    DAEMON_AVAILABLE.set(false).ok();
+                    return Ok(None);
+                }
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| Backend::new(client));
+    Server::new(stdin, stdout, socket).serve(service).await;
+
+    Ok(())
+}
