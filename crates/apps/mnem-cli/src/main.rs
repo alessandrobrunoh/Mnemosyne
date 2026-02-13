@@ -9,7 +9,7 @@ mod ui_components;
 
 #[derive(Parser)]
 #[command(name = "mnem")]
-#[command(version = "0.2.0")]
+#[command(version = "0.1.0")]
 #[command(about = "Mnemosyne - Local history companion", long_about = None)]
 #[command(styles = styles())]
 struct Cli {
