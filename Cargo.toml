@@ -67,6 +67,7 @@ syntect = "5.3"
 ratatui = "0.26"
 crossterm = "0.27"
 windows-sys = "0.52"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 mnem-tui = { path = "crates/apps/mnem-tui" }
 mnem-daemon = { path = "crates/apps/mnem-daemon" }
 mnem-macros = { path = "crates/core/mnem-macros" }

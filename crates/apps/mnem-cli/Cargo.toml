@@ -18,6 +18,7 @@ crossterm.workspace = true
 syntect.workspace = true
 similar.workspace = true
 chrono.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
 windows-sys.workspace = true
@@ -26,3 +27,4 @@ tree-sitter-rust = { workspace = true }
 tree-sitter-ruby = { workspace = true }
 notify = "6.1"
 clap = { version = "4.0", features = ["derive"] }
+reqwest.workspace = true
