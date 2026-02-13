@@ -37,7 +37,6 @@ impl Ide {
 pub struct Config {
     pub retention_days: u64,
     pub compression_enabled: bool,
-    pub use_gitignore: bool,
     pub use_mnemosyneignore: bool,
     pub theme_index: usize,
     #[serde(default = "default_max_file_size_mb")]
@@ -55,7 +54,6 @@ impl Default for Config {
         Self {
             retention_days: 30,
             compression_enabled: true,
-            use_gitignore: true,
             use_mnemosyneignore: true,
             theme_index: 0,
             max_file_size_mb: default_max_file_size_mb(),

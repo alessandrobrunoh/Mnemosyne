@@ -36,14 +36,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             },
         ),
         (
-            "Gitignore",
-            if state.config.use_gitignore {
-                "Active".to_string()
-            } else {
-                "Inactive".to_string()
-            },
-        ),
-        (
             "Mnemosyneignore",
             if state.config.use_mnemosyneignore {
                 "Active".to_string()

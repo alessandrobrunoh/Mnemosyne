@@ -58,7 +58,7 @@ impl Monitor {
         let mut debouncers: HashMap<PathBuf, Instant> = HashMap::new();
         let mut interval = tokio::time::interval(Duration::from_millis(500));
 
-        let gitignore = self.get_gitignore()?;
+        let mnemignore = self.get_mnemignore()?;
         let config_max_size = self.repo.config.lock()
             .unwrap_or_else(|p| p.into_inner())
             .config.max_file_size_mb;
@@ -70,7 +70,7 @@ impl Monitor {
 
                 Some(event) = rx.recv() => {
                     log::info!("File event received: {:?}", event.path);
-                    if !self.is_ignored(&event.path, Some(&gitignore)) {
+                    if !self.is_ignored(&event.path, Some(&mnemignore)) {
 
                         // Cap memory usage under heavy load (audit 4.5)
                         if debouncers.len() > 10000 {
@@ -162,11 +162,11 @@ impl Monitor {
     /// Parallel initial scan using rayon for large codebases (audit 2.4).
     /// Processes files in chunks with throttling to avoid saturating IO (audit 4.5).
     pub fn initial_scan(&self) -> AppResult<()> {
-        let gitignore = self.get_gitignore()?;
+        let mnemignore = self.get_mnemignore()?;
         use ignore::WalkBuilder;
         let walker = WalkBuilder::new(&self.root_path)
             .hidden(true)
-            .git_ignore(true)
+            .git_ignore(false)
             .build();
 
         let max_file_size = self
@@ -181,7 +181,7 @@ impl Monitor {
 
         let entries: Vec<_> = walker
             .filter_map(|r| r.ok())
-            .filter(|e| e.path().is_file() && !self.is_ignored(e.path(), Some(&gitignore)))
+            .filter(|e| e.path().is_file() && !self.is_ignored(e.path(), Some(&mnemignore)))
             .collect();
 
         // Process in chunks of 100 files with rayon parallelism (audit 4.5)
@@ -195,7 +195,7 @@ impl Monitor {
     }
 
     /// Path-based ignore check using path components instead of string contains (audit 5.5).
-    fn is_ignored(&self, path: &Path, gitignore: Option<&ignore::gitignore::Gitignore>) -> bool {
+    fn is_ignored(&self, path: &Path, mnemignore: Option<&ignore::gitignore::Gitignore>) -> bool {
         let relative = path.strip_prefix(&self.root_path).unwrap_or(path);
 
         // Use path components for exact matching (audit 5.5)
@@ -212,15 +212,15 @@ impl Monitor {
             return true;
         }
 
-        if let Some(gi) = gitignore {
-            if gi.matched(relative, false).is_ignore() {
+        if let Some(mi) = mnemignore {
+            if mi.matched(relative, false).is_ignore() {
                 return true;
             }
         }
         false
     }
 
-    fn get_gitignore(&self) -> AppResult<ignore::gitignore::Gitignore> {
+    fn get_mnemignore(&self) -> AppResult<ignore::gitignore::Gitignore> {
         let config = self
             .repo
             .config
@@ -238,15 +238,7 @@ impl Monitor {
             }
         }
 
-        // 2. Project-level Ignores
-        if config.use_gitignore {
-            if let Some(ignore_path) =
-                Some(self.root_path.join(".gitignore")).filter(|p| p.exists())
-            {
-                builder.add(ignore_path);
-            }
-        }
-
+        // 2. Project-level .mnemignore
         if config.use_mnemosyneignore {
             if let Some(ignore_path) =
                 Some(self.root_path.join(".mnemosyneignore")).filter(|p| p.exists())
@@ -257,7 +249,7 @@ impl Monitor {
 
         Ok(builder
             .build()
-            .map_err(|e| AppError::Config(format!("Gitignore build failed: {}", e)))?)
+            .map_err(|e| AppError::Config(format!("Mnemignore build failed: {}", e)))?)
     }
 }
 
