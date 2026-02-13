@@ -139,7 +139,7 @@ impl Command for SearchCommand {
 
                 for loc in locs {
                     println!(
-                        "┊   {} {} {} [{}-{}]",
+                        "┃   {} {} {} [{}-{}]",
                         "•".cyan(),
                         loc.kind.as_str().blue().bold(),
                         loc.name.as_str().bold().white(),
@@ -181,6 +181,7 @@ impl Command for SearchCommand {
         }
 
         layout.header("SEARCH RESULTS");
+        layout.empty();
 
         let mut files = Vec::new();
         for r in &results {
@@ -196,8 +197,10 @@ impl Command for SearchCommand {
                 .filter(|r| r.file_path == file_path)
                 .collect();
 
-            layout.section_start("fi", &filename);
-            layout.item_simple(&file_path.dark_grey().to_string());
+            // Header file con nome e percorso
+            layout.item_simple(&format!("{} {}", "📄".cyan(), filename.bold().white()));
+            layout.item_simple(&file_path.dark_grey());
+            layout.empty();
 
             let mut hashes = Vec::new();
             for r in &matches_in_file {
@@ -222,26 +225,29 @@ impl Command for SearchCommand {
                 let styled_hash = hash_short.with(ui::ACCENT).bold().to_string();
                 let clickable_link = ui::Hyperlink::action(&styled_hash, "open", &hash);
 
+                // Riga snapshot con metadati
                 let meta = format!(
-                    "{}   {}   {}",
-                    timestamp.dark_grey(),
+                    "{}  {}  [{}]",
+                    timestamp.with(crossterm::style::Color::DarkGrey),
                     branch.cyan().italic(),
-                    format!("({} matches)", matches_in_snap.len()).dim()
+                    format!("{} match(es)", matches_in_snap.len())
                 );
-
                 layout.row_snapshot(&clickable_link, &meta);
 
+                // Mostra i match con evidenza
                 for m in matches_in_snap {
                     let highlighted = highlight_match(&m.content, &query);
                     println!(
-                        "┊{: >12} {}",
-                        format!("L{}", m.line_number).dark_grey(),
+                        "┃   L{: >4}  {}",
+                        m.line_number.to_string().dark_grey(),
                         highlighted
                     );
                 }
             }
-            layout.section_end();
+            layout.empty();
         }
+
+        layout.empty();
 
         if results.len() >= limit {
             layout.item_simple(&format!(
@@ -249,7 +255,8 @@ impl Command for SearchCommand {
                 limit
             ));
         }
-        layout.footer("Shift+Click the hash to open the snapshot version in your IDE.");
+
+        layout.footer_hint("Click on hash to open that version in your IDE");
         Ok(())
     }
 }

@@ -56,7 +56,8 @@ impl Command for DiffCommand {
 
         let history: Vec<mnem_core::protocol::SnapshotInfo> = serde_json::from_value(res)?;
         if history.is_empty() {
-            println!("No history found.");
+            layout.header("FILE COMPARISON");
+            layout.item_simple("No history found for this file.");
             return Ok(());
         }
 
@@ -79,33 +80,58 @@ impl Command for DiffCommand {
         let diff_res: mnem_core::protocol::FileDiffResponse = serde_json::from_value(res)?;
         let filename = get_filename(&file_path);
 
+        // Header
         layout.header("FILE COMPARISON");
-        layout.section_start("di", &filename);
-        let base_name = if is_disk {
-            "Current Disk".yellow()
-        } else {
-            hash2[..8.min(hash2.len())].blue().bold()
-        };
-        layout.item_simple(&format!(
-            "Comparing: {} -> {}",
-            hash1[..8.min(hash1.len())].blue().bold(),
-            base_name
-        ));
-        println!("┊");
+        layout.empty();
 
-        for line in diff_res.diff.lines() {
-            let styled_line = if line.starts_with('+') {
-                line.green()
-            } else if line.starts_with('-') {
-                line.red()
-            } else if line.starts_with("@@") {
-                line.cyan().dim()
+        // File info
+        layout.item_simple(&format!("📄 {}", filename.bold().white()));
+        layout.item_simple(&file_path.dark_grey());
+        layout.empty();
+
+        // Comparison header
+        layout.item_simple(&format!(
+            "{} {}  ->  {}",
+            "Compare:".dim(),
+            hash1[..8.min(hash1.len())].blue().bold(),
+            if is_disk {
+                "Current Disk".yellow()
             } else {
-                line.stylize()
-            };
-            layout.item_simple(&styled_line.to_string());
+                hash2[..8.min(hash2.len())].green().bold()
+            }
+        ));
+        layout.empty();
+
+        // Stats
+        let additions = diff_res.diff.lines().filter(|l| l.starts_with('+')).count();
+        let deletions = diff_res.diff.lines().filter(|l| l.starts_with('-')).count();
+        layout.item_simple(&format!(
+            "{}  +{}  -{}",
+            "Changes:".bold().white(),
+            additions.to_string().green(),
+            deletions.to_string().red()
+        ));
+        layout.empty();
+
+        // Diff content with proper formatting
+        for line in diff_res.diff.lines() {
+            if line.starts_with("@@") {
+                // Hunk header
+                println!("┃{}", line.cyan().bold());
+            } else if line.starts_with('+') {
+                // Addition
+                println!("┃  {} {}", "+".green().bold(), line.green());
+            } else if line.starts_with('-') {
+                // Deletion
+                println!("┃  {} {}", "-".red().bold(), line.red());
+            } else {
+                // Context
+                println!("┃   {}", line.with(crossterm::style::Color::DarkGrey));
+            }
         }
-        layout.section_end();
+
+        layout.empty();
+        layout.footer_hint("Use 'mnem log <file>' to see full version history");
         Ok(())
     }
 }

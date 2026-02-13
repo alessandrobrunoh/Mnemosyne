@@ -111,17 +111,17 @@ impl Layout {
     }
 
     pub fn section_timeline(&self, code: &str, title: &str) {
-        println!();
+        println!("┃");
         println!(
-            "  {} {}",
-            "◆".with(self.theme.accent),
+            "┃{} {} [{}]",
+            "╭┄",
+            code.with(self.theme.accent).bold(),
             title.with(self.theme.text_bright).bold()
         );
-        println!("  {}", "─".repeat(40).with(self.theme.border_dim));
     }
 
     pub fn section_end(&self) {
-        println!();
+        println!("┃├╯");
     }
 
     pub fn row_timeline(&self, icon: &str, content: &str) {
@@ -141,7 +141,7 @@ impl Layout {
         };
 
         println!(
-            "  {} {: <9} {: <10} {}",
+            "┃{} {: <9} {: <10} {}",
             icon,
             hash_styled,
             time.with(self.theme.text_dim),
@@ -157,7 +157,7 @@ impl Layout {
         };
 
         println!(
-            "    {} {: <4} {: <8} {}",
+            "┃  {} {: <4} {: <8} {}",
             icon,
             format!("#{}", index).with(self.theme.secondary).bold(),
             hash.with(self.theme.timeline_purple).bold().underlined(),
@@ -266,7 +266,7 @@ impl Layout {
 
     pub fn row_key_value(&self, key: &str, value: &str) {
         println!(
-            "    {: <15} {}",
+            "┃   {: <15} {}",
             key.with(self.theme.text_dim),
             value.with(self.theme.text_bright)
         );
@@ -279,7 +279,7 @@ impl Layout {
             icon.to_string()
         };
         println!(
-            "    {} {: <14} {}",
+            "┃   {} {: <14} {}",
             display_icon.with(self.theme.warning),
             label.with(self.theme.secondary),
             value.with(self.theme.text_bright).bold()
@@ -289,7 +289,7 @@ impl Layout {
     pub fn row_metric(&self, icon: &str, label: &str, value: &str) {
         // Removed icon for cleaner look, focusing on label alignment
         println!(
-            "    {: <15} {}",
+            "┃   {: <15} {}",
             label.with(self.theme.text_dim),
             value.with(self.theme.text_bright).bold()
         );
@@ -325,9 +325,9 @@ impl Layout {
     }
 
     pub fn footer_hint(&self, hint: &str) {
-        println!();
+        println!("┃");
         println!(
-            "  {} {}",
+            "┃  {} {}",
             "💡".with(self.theme.warning),
             hint.with(self.theme.text_muted)
         );
@@ -346,7 +346,7 @@ impl Layout {
     }
 
     pub fn row_list(&self, _icon: &str, content: &str) {
-        println!("    {}", content.with(self.theme.text));
+        println!("┃   {}", content.with(self.theme.text));
     }
 
     pub fn success(&self, message: &str) {
@@ -409,7 +409,7 @@ impl Layout {
     }
 
     pub fn item_simple(&self, content: &str) {
-        println!("    {}", content.with(self.theme.text));
+        println!("┃   {}", content.with(self.theme.text));
     }
 
     pub fn item_accent(&self, content: &str) {
