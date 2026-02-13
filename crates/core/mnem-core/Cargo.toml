@@ -5,12 +5,12 @@ edition = "2024"
 
 [dependencies]
 semantic-delta-protocol.workspace = true
-rusqlite.workspace = true
-r2d2.workspace = true
-r2d2_sqlite.workspace = true
+redb.workspace = true
 blake3.workspace = true
 notify.workspace = true
 log.workspace = true
+bincode.workspace = true
+tokio = { workspace = true, features = ["full"] }
 
 chrono.workspace = true
 anyhow.workspace = true

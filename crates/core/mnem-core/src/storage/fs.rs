@@ -50,6 +50,7 @@ fn is_already_compressed(data: &[u8]) -> bool {
     false
 }
 
+#[derive(Clone)]
 pub struct CasStorage {
     base_dir: PathBuf,
 }
@@ -184,14 +185,13 @@ impl CasStorage {
         }
 
         // --- Semantic Delta Compression Logic ---
-        // Optimization: Use Zstd with a higher compression level for text chunks
-        // and optionally train a dictionary (advanced future feature).
-        // Currently, we just ensure optimal settings for code.
+        // Optimization: Use Zstd level 3.
+        // Level 3 is the sweet spot for speed and ratio.
+        // Higher levels (like 9) are too slow for the development loop.
         let compression_level = if !enable_compression || is_already_compressed(content) {
             0
         } else {
-            // Level 7-9 is great for small code chunks without being too slow
-            9
+            3
         };
 
         // Atomic write with persist_noclobber to avoid TOCTOU race
@@ -352,7 +352,7 @@ mod tests {
     fn write_and_read_roundtrip() {
         let (_dir, storage) = setup();
         let content = b"Hello, Mnemosyne!";
-        let hash = storage.write(content).unwrap();
+        let hash = storage.write(content, true).unwrap();
         let result = storage.read(&hash).unwrap();
         assert_eq!(result, content);
     }
@@ -361,8 +361,8 @@ mod tests {
     fn deduplication_same_content() {
         let (_dir, storage) = setup();
         let content = b"same content";
-        let hash1 = storage.write(content).unwrap();
-        let hash2 = storage.write(content).unwrap();
+        let hash1 = storage.write(content, true).unwrap();
+        let hash2 = storage.write(content, true).unwrap();
         assert_eq!(hash1, hash2);
 
         // Check that only one file exists in objects
@@ -406,7 +406,7 @@ mod tests {
         }
         drop(f);
 
-        let hash = storage.write_stream(&large_file).unwrap();
+        let hash = storage.write_stream(&large_file, true).unwrap();
         let result = storage.read(&hash).unwrap();
         assert_eq!(result.len(), 5 * 1024 * 1024);
         assert!(result.iter().all(|&b| b == b'x'));

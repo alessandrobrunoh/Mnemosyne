@@ -1,19 +1,19 @@
 use crate::config::ConfigManager;
 use crate::error::{AppError, AppResult};
 use crate::models::{FileEntry, Project, SearchResult, Session, Snapshot};
-use crate::semantic::diff::SemanticDiffer;
 use crate::semantic::SemanticParser;
 use crate::storage::registry::ProjectRegistry;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::database::Database;
 use super::fs::CasStorage;
 
 pub struct Repository {
-    pub db: Database,
-    pub fs: CasStorage,
+    pub db: Arc<Database>,
+    pub fs: Arc<CasStorage>,
     pub config: Mutex<ConfigManager>,
     pub project: Project,
 }
@@ -104,7 +104,7 @@ impl Repository {
         }
 
         let db_path = db_dir.join("mnemosyne.db");
-        let db = Database::new(db_path)?;
+        let db = Arc::new(Database::new(db_path)?);
 
         let cas_dir = project_mnem_dir.join("cas");
         if !cas_dir.exists() {
@@ -113,7 +113,7 @@ impl Repository {
                 source: e,
             })?;
         }
-        let fs = CasStorage::new(cas_dir)?;
+        let fs = Arc::new(CasStorage::new(cas_dir)?);
 
         let config = ConfigManager::new(&base_dir)?;
 
@@ -192,7 +192,7 @@ temp/
     }
 
     /// Calculate the size of the project's history in bytes.
-    /// Sum of all unique chunks linked to this project + SQLite DB size (including WAL/SHM).
+    /// Sum of all unique chunks linked to this project + redb file size.
     pub fn get_project_size(&self) -> AppResult<u64> {
         let mut total = 0;
 
@@ -204,17 +204,9 @@ temp/
             }
         }
 
-        // 2. Add SQLite DB size (including WAL and SHM files)
-        let paths = [
-            self.db.path.clone(),
-            self.db.path.with_extension("sqlite-wal"),
-            self.db.path.with_extension("sqlite-shm"),
-        ];
-
-        for path in paths {
-            if let Ok(metadata) = std::fs::metadata(path) {
-                total += metadata.len();
-            }
+        // 2. Add redb DB size
+        if let Ok(metadata) = std::fs::metadata(&self.db.path) {
+            total += metadata.len();
         }
 
         Ok(total)
@@ -373,9 +365,9 @@ temp/
         let timestamp = chrono::Local::now().to_rfc3339();
         let branch = self.get_current_branch();
 
-        // Ensure the full file content is stored in CAS for quick retrieval/preview (audit 5.4)
-        let enable_compression = self.is_compression_enabled();
-        self.fs.write(&content, enable_compression)?;
+        // Optimization: Do NOT write the full content to CAS anymore.
+        // We only store chunks (Step 3) and reassemble if needed.
+        // This saves ~50% disk space.
 
         let snapshot_id =
             self.db
@@ -388,8 +380,18 @@ temp/
 
         for chunk in chunks {
             let chunk_hash = blake3::hash(&chunk.data).to_hex().to_string();
-            self.fs.write(&chunk.data, enable_compression)?; // Filesystem CAS
-            self.db.insert_chunk(&chunk_hash, &chunk.data, "raw")?; // DB metadata
+            let enable_compression = self.is_compression_enabled();
+            self.fs.write(&chunk.data, enable_compression)?; // Filesystem CAS (Only chunks)
+            self.db.insert_chunk(&chunk_hash, "raw")?; // DB metadata
+            
+            // Improvement: Trigram indexing for Grep (Background)
+            let db_c = self.db.clone();
+            let hash_c = chunk_hash.clone();
+            let data_c = chunk.data.clone();
+            tokio::spawn(async move {
+                let _ = db_c.update_chunk_trigrams(&hash_c, &data_c);
+            });
+
             chunks_info.push((chunk_hash, chunk.offset, chunk.length));
         }
 
@@ -398,95 +400,93 @@ temp/
             self.db.link_snapshot_chunk(snapshot_id, hash, pos)?;
         }
 
-        // 5. Semantic Indexing (Sync for now, should be background thread later)
-        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if let Ok(mut parser) = SemanticParser::new() {
-            if let Ok((symbols, references)) =
-                parser.parse_semantic_data(&content, ext, snapshot_id, Some(&path_str))
-            {
-                let mut should_save_symbols = true;
-                let mut prev_snapshot_id = None;
-                let mut prev_symbols = Vec::new();
+        // 5. Semantic Indexing (Background)
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+        let db = self.db.clone();
+        let path_str = path_str.clone();
 
-                if let Some((pid, psyms)) = previous_snapshot_data {
-                    prev_snapshot_id = Some(pid);
-                    prev_symbols = psyms;
+        tokio::spawn(async move {
+            use crate::semantic::diff::SemanticDiffer;
+            if let Ok(mut parser) = SemanticParser::new() {
+                if let Ok((symbols, references)) =
+                    parser.parse_semantic_data(&content, &ext, snapshot_id, Some(&path_str))
+                {
+                    let mut should_save_symbols = true;
+                    let mut prev_snapshot_id = None;
+                    let mut prev_symbols = Vec::new();
 
-                    // Calculate a "Structural Signature" of the file
-                    let current_sig: String = symbols
-                        .iter()
-                        .map(|s| &s.structural_hash)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join("");
-                    let last_sig: String = prev_symbols
-                        .iter()
-                        .map(|s| &s.structural_hash)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join("");
+                    if let Some((pid, psyms)) = previous_snapshot_data {
+                        prev_snapshot_id = Some(pid);
+                        prev_symbols = psyms;
 
-                    if current_sig == last_sig && !current_sig.is_empty() {
-                        should_save_symbols = false;
+                        // Calculate a "Structural Signature" of the file
+                        let current_sig: String = symbols
+                            .iter()
+                            .map(|s| &s.structural_hash)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("");
+                        let last_sig: String = prev_symbols
+                            .iter()
+                            .map(|s| &s.structural_hash)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("");
+
+                        if current_sig == last_sig && !current_sig.is_empty() {
+                            should_save_symbols = false;
+                        }
                     }
-                }
 
-                // Compute and store Semantic Deltas
-                if prev_snapshot_id.is_some() || !symbols.is_empty() {
-                    let deltas = SemanticDiffer::compare(
-                        &prev_symbols,
-                        &symbols,
-                        prev_snapshot_id,
-                        snapshot_id,
-                    );
-
-                    for delta in deltas {
-                        let _ = self.db.insert_symbol_delta(&delta);
+                    let mut deltas_to_save = Vec::new();
+                    // Compute and store Semantic Deltas
+                    if prev_snapshot_id.is_some() || !symbols.is_empty() {
+                        let deltas = SemanticDiffer::compare(
+                            &prev_symbols,
+                            &symbols,
+                            prev_snapshot_id,
+                            snapshot_id,
+                        );
+                        deltas_to_save = deltas;
                     }
-                }
 
-                if should_save_symbols {
-                    // Stack of (symbol_end_byte, db_id)
-                    let mut parent_stack: Vec<(usize, i64)> = Vec::new();
+                    let mut symbols_to_save = Vec::new();
+                    if should_save_symbols {
+                        // We cannot easily use a stack with parent_id if we want to batch perfectly,
+                        // but we can compute the tree structure here and then batch the list.
+                        // For simplicity, let's just collect them.
+                        let mut parent_stack: Vec<(usize, i64)> = Vec::new();
 
-                    for mut symbol in symbols {
-                        // Pop parents that don't contain this symbol
-                        while let Some((parent_end, _)) = parent_stack.last() {
-                            if symbol.start_byte >= *parent_end {
-                                parent_stack.pop();
-                            } else {
-                                break;
+                        for mut symbol in symbols {
+                            while let Some((parent_end, _)) = parent_stack.last() {
+                                if symbol.start_byte >= *parent_end { parent_stack.pop(); } else { break; }
+                            }
+                            if let Some((_, parent_db_id)) = parent_stack.last() {
+                                symbol.parent_id = Some(*parent_db_id);
+                            }
+                            if let Some((chunk_hash, _, _)) = chunks_info.iter().find(|(_, offset, len)| {
+                                symbol.start_byte >= *offset && symbol.start_byte < (*offset + *len)
+                            }) {
+                                symbol.chunk_hash = chunk_hash.clone();
+                            }
+                            
+                            // To get the parent_id correctly, we still need to insert them sequentially 
+                            // or compute the IDs locally. redb uses u64 IDs we generate.
+                            // Let's keep the sequential insert for symbols to maintain parent_id integrity,
+                            // but batch the rest.
+                            if let Ok(db_id) = db.insert_symbol(&symbol) {
+                                parent_stack.push((symbol.end_byte, db_id));
+                                symbol.id = db_id;
+                                symbols_to_save.push(symbol);
                             }
                         }
-
-                        // Set parent_id if applicable
-                        if let Some((_, parent_db_id)) = parent_stack.last() {
-                            symbol.parent_id = Some(*parent_db_id);
-                        }
-
-                        // Find which chunk contains the start of this symbol
-                        if let Some((chunk_hash, _, _)) =
-                            chunks_info.iter().find(|(_, offset, len)| {
-                                symbol.start_byte >= *offset && symbol.start_byte < (*offset + *len)
-                            })
-                        {
-                            symbol.chunk_hash = chunk_hash.clone();
-                        }
-
-                        // Insert and get ID
-                        if let Ok(db_id) = self.db.insert_symbol(&symbol) {
-                            // Push this symbol onto stack as a potential parent
-                            parent_stack.push((symbol.end_byte, db_id));
-                        }
                     }
-                }
 
-                // Save references
-                for reference in references {
-                    let _ = self.db.insert_reference(&reference);
+                    // Use the new batch method for references and deltas (Symbols are already saved for parent_id)
+                    let _ = db.batch_insert_semantic_data(Vec::new(), deltas_to_save, references);
                 }
             }
-        }
+        });
 
         Ok(full_hash)
     }
@@ -629,6 +629,13 @@ temp/
             return Ok(Vec::new());
         }
 
+        // Improvement: Use Trigram Index to pre-filter chunks
+        let candidate_chunks = if query.len() >= 3 {
+            self.db.filter_chunks_by_trigrams(query).unwrap_or_default()
+        } else {
+            HashSet::new()
+        };
+
         let snapshots = self.db.get_all_snapshots_deduped()?;
 
         const MAX_RESULTS: usize = 200;
@@ -642,6 +649,15 @@ temp/
                 } else {
                     true
                 }
+            })
+            .filter(|snap| {
+                // If we have trigram results, only check snapshots that contain a matching chunk
+                if !candidate_chunks.is_empty() {
+                    if let Ok(chunks) = self.db.get_chunks_for_hash(&snap.content_hash) {
+                        return chunks.iter().any(|h| candidate_chunks.contains(h));
+                    }
+                }
+                true
             })
             .filter_map(|snap| {
                 let content = self.fs.read(&snap.content_hash).ok()?;

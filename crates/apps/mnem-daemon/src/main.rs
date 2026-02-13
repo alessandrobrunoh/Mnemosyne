@@ -210,8 +210,6 @@ where
             }
         };
 
-        let start = std::time::Instant::now();
-        
         // Token Validation
         let is_authorized = request.auth_token.as_ref() == Some(&state.auth_token);
 
@@ -223,9 +221,6 @@ where
         }
 
         let response = handle_request(&request, &state).await;
-        let duration = start.elapsed();
-
-        state.record_request(duration.as_micros() as u64);
 
         let resp_json = serde_json::to_string(&response)? + "\n";
         writer.write_all(resp_json.as_bytes()).await?;

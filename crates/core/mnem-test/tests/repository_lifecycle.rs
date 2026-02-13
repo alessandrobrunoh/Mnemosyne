@@ -3,13 +3,16 @@ use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-#[test]
-fn test_repository_lifecycle() {
+#[tokio::test]
+async fn test_repository_lifecycle() {
     let dir = TempDir::new().unwrap();
-    let base_dir = dir.path().join(".mnemosyne");
+    let base_dir = dir.path().join("home_mnemosyne");
+    fs::create_dir_all(&base_dir).unwrap();
     let project_dir = dir.path().join("project");
-    fs::create_dir_all(&project_dir).unwrap();
-
+    let project_mnem_dir = project_dir.join(".mnemosyne");
+    fs::create_dir_all(&project_mnem_dir).unwrap();
+    fs::write(project_mnem_dir.join("tracked"), "project_id: lifecycle-test").unwrap();
+    
     let repo = Repository::open(base_dir, project_dir).unwrap();
 
     let file_path = repo.project.path.clone() + "/test.txt";

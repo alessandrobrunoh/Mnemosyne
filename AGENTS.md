@@ -17,14 +17,12 @@ The goal is to build a TUI (Text-based User Interface), CLI (Command Line Interf
 
 - **Strict Pathing**: Always use absolute paths for file system operations.
 - **Error Handling**: No `unwrap()` or `expect()` in the daemon. Use `Result` and propagate errors using `AppError`.
-- **Database**: SQLite is used as a relational index for metadata, while the filesystem is the source of truth for blobs (Content-Addressable Storage).
+- **Database**: **redb** is used as a high-performance B-tree index for metadata, while the filesystem is the source of truth for chunks (Content-Addressable Storage). String interning and trigram indexing are used to optimize space and search speed.
 - **Tooling**: Ensure any new CLI command follows the `Layout` UI patterns for consistency.
 
 ## Vision for Future Contributors
 
-- **Connection Pooling**: Transition from `Mutex<Connection>` to an authenticated connection pool (e.g., `r2d2-sqlite`) to allow massive parallel reads.
 - **Incremental Parsing**: Implement Tree-sitter incremental re-parsing to handle massive files with microsecond latency.
-- **String Interning**: Reduce memory footprint by interning common symbols and paths.
 - **Semantic Patching**: Store actual data as semantic deltas (patches) instead of raw chunks when logic is similar.
 - **Platform Parity**: Always maintain full feature parity between Windows (Named Pipes) and Unix-like systems.
 

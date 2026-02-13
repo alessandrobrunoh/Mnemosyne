@@ -1,15 +1,11 @@
 use ignore::gitignore::GitignoreBuilder;
-use lru::LruCache;
 use mnem_core::{AppError, AppResult, Repository};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
-use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-
-const DEBOUNCER_CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(5000).unwrap();
 
 pub struct Monitor {
     root_path: PathBuf,
@@ -57,8 +53,8 @@ impl Monitor {
             }
         });
 
-        // Event Loop
-        let mut debouncers: LruCache<PathBuf, Instant> = LruCache::new(DEBOUNCER_CACHE_SIZE);
+        // Event Loop: Adaptive Debouncing
+        let mut debounced_paths: std::collections::HashMap<PathBuf, (Instant, u32)> = std::collections::HashMap::new();
         let mut interval = tokio::time::interval(Duration::from_millis(500));
 
         let mnemignore = self.get_mnemignore()?;
@@ -70,40 +66,44 @@ impl Monitor {
         log::info!("Monitor loop started for {:?}", self.root_path);
         loop {
             tokio::select! {
-
                 Some(event) = rx.recv() => {
-                    log::info!("File event received: {:?}", event.path);
                     if !self.is_ignored(&event.path, Some(&mnemignore)) {
-                        // LRU cache automatically evicts oldest entry when full
-                        debouncers.push(event.path, Instant::now() + Duration::from_secs(1));
+                        let now = Instant::now();
+                        let entry = debounced_paths.entry(event.path).or_insert((now, 0));
+                        
+                        // Adaptive delay: increase delay if file changes too frequently
+                        entry.1 += 1;
+                        let delay_secs = match entry.1 {
+                            1..=2 => 1,
+                            3..=5 => 5,
+                            _ => 10,
+                        };
+                        entry.0 = now + Duration::from_secs(delay_secs);
                     }
                 }
                 _ = interval.tick() => {
                     let now = Instant::now();
                     let mut to_save = Vec::new();
 
-                    // Collect expired entries and remove them from cache
-                    let keys_to_remove: Vec<PathBuf> = debouncers
+                    // Find ready paths
+                    let ready_paths: Vec<PathBuf> = debounced_paths
                         .iter()
-                        .filter(|(_, deadline)| now >= **deadline)
+                        .filter(|(_, (deadline, _))| now >= *deadline)
                         .map(|(path, _)| path.clone())
                         .collect();
 
-                    // Remove expired entries and collect paths to save
-                    for path in keys_to_remove {
-                        if debouncers.pop(&path).is_some() {
+                    for path in ready_paths {
+                        if debounced_paths.remove(&path).is_some() {
                             to_save.push(path);
                         }
                     }
 
                     if !to_save.is_empty() {
-                        // Parallel processing of changed files
                         to_save.par_iter().for_each(|path| {
                             self.process_file(path, max_file_size);
                         });
                     }
                 }
-
             }
         }
     }

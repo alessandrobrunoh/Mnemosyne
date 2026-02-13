@@ -63,22 +63,22 @@ mod tests {
         } else {
             "/tmp/mnemosyne_test"
         };
-        env::set_var(ENV_DATA_DIR, test_path);
+        unsafe { env::set_var(ENV_DATA_DIR, test_path) };
 
         let result = get_base_dir();
         assert!(result.is_ok(), "get_base_dir() failed: {:?}", result);
         assert_eq!(result.unwrap(), PathBuf::from(test_path));
 
-        env::remove_var(ENV_DATA_DIR);
+        unsafe { env::remove_var(ENV_DATA_DIR) };
     }
 
     #[test]
     fn test_get_base_dir_relative_path_rejected() {
-        env::set_var(ENV_DATA_DIR, "relative/path");
+        unsafe { env::set_var(ENV_DATA_DIR, "relative/path") };
 
         let result = get_base_dir();
         assert!(result.is_err());
 
-        env::remove_var(ENV_DATA_DIR);
+        unsafe { env::remove_var(ENV_DATA_DIR) };
     }
 }

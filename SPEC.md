@@ -118,7 +118,7 @@ Implementations should aim for zero-copy data handling:
 - Use reference-counted buffers (e.g., Rust `bytes::Bytes`) to share content between parsing and storage layers.
 
 ### 8.2 Hybrid Storage
-Metadata should be indexed in a relational manner (e.g., SQLite) while actual file contents should be stored in a **Content-Addressable Storage (CAS)** system using **BLAKE3** hashing for global deduplication.
+Metadata should be indexed in a highly efficient B-tree or relational manner (e.g., **redb** or **SQLite**) while actual file contents should be stored in a **Content-Addressable Storage (CAS)** system using **BLAKE3** hashing for global deduplication. File assembly should be performed on-the-fly from semantic chunks to minimize disk footprint.
 
 ## 9. Backward Compatibility
 Servers should implement a normalization layer to support legacy methods (e.g., `project/watch` -> `mnem/project/watch`) to support older clients during the transition to v1.0.

@@ -251,9 +251,9 @@ mnem-lsp (LSP Server)
     v
 mnemd (Mnemosyne Daemon)
     |
-    | SQLite Queries
+    | redb Queries
     v
-Mnemosyne Database (~/.mnemosyne/projects/<id>.sqlite)
+Mnemosyne Database (~/.mnemosyne/db/mnemosyne.db)
 ```
 
 ## Development
