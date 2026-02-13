@@ -1,3 +1,4 @@
+
 use anyhow::Result;
 
 pub fn handle_git(commits: bool, log: bool, _hook: bool) -> Result<()> {

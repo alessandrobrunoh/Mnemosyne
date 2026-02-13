@@ -151,10 +151,11 @@ impl Messages {
     /// messages.hint("Use 'mnem help' to see all available commands");
     /// ```
     pub fn hint(&self, message: &str) {
+        println!();
         println!(
-            "{} {}: {}",
-            "💡".with(self.theme.accent),
-            "Hint".with(self.theme.text_dim),
+            "  {} {} {}",
+            "💡".with(self.theme.warning),
+            "Hint:".with(self.theme.text_dim).bold(),
             message.with(self.theme.text_dim).italic()
         );
     }

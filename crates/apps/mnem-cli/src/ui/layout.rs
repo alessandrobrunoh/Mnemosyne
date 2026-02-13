@@ -99,48 +99,52 @@ impl Layout {
 
     pub fn header_dashboard(&self, title: &str) {
         println!();
-        println!("  {}", title.to_uppercase().with(self.theme.info).bold());
-        let bar = "━".repeat(title.len() + 4);
-        println!("  {}", bar.with(self.theme.info));
-        println!("{}", "│".with(self.theme.text_bright));
+        println!(
+            "  {}",
+            title
+                .to_uppercase()
+                .with(self.theme.primary)
+                .bold()
+                .underlined()
+        );
+        println!(); // Spacer instead of bar for cleaner look with tracking
     }
 
     pub fn section_timeline(&self, code: &str, title: &str) {
+        println!();
         println!(
-            "{}╭┄ {} [{}]",
-            "│".with(self.theme.text_bright),
-            code.with(self.theme.accent).bold(),
+            "  {} {}",
+            "◆".with(self.theme.accent),
             title.with(self.theme.text_bright).bold()
         );
+        println!("  {}", "─".repeat(40).with(self.theme.border_dim));
     }
 
     pub fn section_end(&self) {
-        println!("{}", "├╯".with(self.theme.text_bright));
-        println!("{}", "│".with(self.theme.text_bright));
+        println!();
     }
 
     pub fn row_timeline(&self, icon: &str, content: &str) {
-        println!("{}  {} {}", "┊".with(self.theme.text), icon, content);
+        println!("    {} {}", icon, content);
     }
 
     pub fn row_history(&self, hash: &str, time: &str, msg: &str, is_latest: bool) {
         let icon = if is_latest {
             "●".with(self.theme.success)
         } else {
-            "●".with(self.theme.text_muted)
+            " ".with(self.theme.text_muted) // Cleaner look
         };
         let hash_styled = if is_latest {
             hash.with(self.theme.success).bold()
         } else {
-            hash.with(self.theme.accent)
+            hash.with(self.theme.primary)
         };
 
         println!(
-            "{}   {}   {: <8} {: <16} {}",
-            "┊".with(self.theme.text),
+            "  {} {: <9} {: <10} {}",
             icon,
             hash_styled,
-            time.with(self.theme.text_muted),
+            time.with(self.theme.text_dim),
             msg.with(self.theme.text)
         );
     }
@@ -149,16 +153,15 @@ impl Layout {
         let icon = if is_latest {
             "●".with(self.theme.success)
         } else {
-            "●".with(self.theme.text_muted)
+            "·".with(self.theme.text_dim)
         };
 
         println!(
-            "{}   {}   {: <4} {: <8} {}",
-            "│".with(self.theme.text),
+            "    {} {: <4} {: <8} {}",
             icon,
-            format!("#{}", index).with(self.theme.primary).bold(),
-            hash.with(self.theme.text_muted),
-            time.with(self.theme.text)
+            format!("#{}", index).with(self.theme.secondary).bold(),
+            hash.with(self.theme.timeline_purple).bold().underlined(),
+            time.with(self.theme.text_dim).italic()
         );
     }
 
@@ -169,28 +172,42 @@ impl Layout {
         file_path: &str,
         time: &str,
         is_latest: bool,
+        diff_stats: Option<(usize, usize)>,
     ) {
-        let icon = if is_latest {
-            "●".with(self.theme.primary)
+        let (icon, color) = if is_latest {
+            ("●", self.theme.success)
         } else {
-            "●".with(self.theme.text_muted)
+            ("·", self.theme.text_dim)
         };
 
-        let action_colored = match action {
-            "C" | "create" => "C".with(self.theme.timeline_cyan).bold(),
-            "M" | "modify" => "M".with(self.theme.timeline_orange).bold(),
-            "D" | "delete" => "D".with(self.theme.error).bold(),
-            _ => action.with(self.theme.text_muted),
+        // Compact Action Codes: A=Add, M=Mod, D=Del, C=Chk, G=Git
+        let (act_code, act_color) = match action {
+            "C" | "create" | "A" | "add" => ("A", self.theme.success), // Green
+            "M" | "modify" => ("M", self.theme.timeline_yellow),       // Yellow
+            "D" | "delete" => ("D", self.theme.error),                 // Red
+            "CP" | "checkpoint" => ("C", self.theme.timeline_purple),  // Purple
+            "GIT" | "commit" => ("G", self.theme.text_dim),            // Gray
+            _ => ("?", self.theme.text_dim),
+        };
+
+        let diff_text = if let Some((added, removed)) = diff_stats {
+            format!(
+                "{} {}",
+                format!("+{}", added).with(self.theme.success),
+                format!("-{}", removed).with(self.theme.error)
+            )
+        } else {
+            String::new()
         };
 
         println!(
-            "{} {} {} {} {} {}",
-            "│".with(self.theme.text),
-            icon,
-            hash.with(self.theme.primary).bold(),
-            action_colored,
-            file_path.with(self.theme.text),
-            time.with(self.theme.text_muted)
+            "  {} {: <8} {} {: <35} {: <10} {}",
+            icon.with(color),
+            hash.with(self.theme.timeline_purple).bold().underlined(),
+            act_code.with(act_color).bold(),
+            file_path.with(self.theme.text_bright),
+            diff_text,
+            time.with(self.theme.text_dim).italic()
         );
     }
 
@@ -202,96 +219,80 @@ impl Layout {
         );
         let bar = "─".repeat(title.len() + 4);
         println!("  {}", bar.with(self.theme.border));
-        println!("{}", "│".with(self.theme.text));
+        // Removed vertical line
     }
 
     pub fn section_branch(&self, code: &str, title: &str) {
-        use crossterm::style::Color;
-        let violet = Color::Rgb {
-            r: 189,
-            g: 147,
-            b: 249,
-        };
+        println!();
         println!(
-            "{}╭┄ {} [{}]",
-            "│".with(self.theme.text_bright),
-            code.with(violet).bold(),
+            "  {}  {}",
+            code.to_uppercase().with(self.theme.secondary).bold(),
             title.with(self.theme.text_bright).bold()
         );
+        println!("  {}", "┄".repeat(40).with(self.theme.border_dim));
     }
 
     pub fn row_search_match(&self, line_num: usize, content: &str) {
         let content_trimmed = content.trim();
         println!(
-            "{}   {} {}",
-            "┊".with(self.theme.text),
-            format!("L{}", line_num).with(self.theme.text_muted),
+            "    {: <6} {}",
+            format!("L{}", line_num).with(self.theme.text_dim),
             content_trimmed.with(self.theme.text)
         );
     }
 
     pub fn row_file_path(&self, path: &str) {
-        println!(
-            "{}   {}",
-            "┊".with(self.theme.text),
-            path.with(self.theme.text_muted)
-        );
+        println!("    {}", path.with(self.theme.text_dim));
     }
 
     pub fn row_status(&self, label: &str, value: &str) {
+        let val_color = if value.to_lowercase().contains("active")
+            || value.to_lowercase().contains("on")
+        {
+            self.theme.success
+        } else if value.to_lowercase().contains("inactive") || value.to_lowercase().contains("off")
+        {
+            self.theme.error
+        } else {
+            self.theme.info_bright
+        };
+
         println!(
-            "{} {} {}",
-            "│".with(self.theme.text_bright),
-            label.with(self.theme.text_muted),
-            value.with(self.theme.text_bright).bold()
+            "    {: <15} {}",
+            label.with(self.theme.text_dim),
+            value.with(val_color).bold()
         );
     }
 
     pub fn row_key_value(&self, key: &str, value: &str) {
         println!(
-            "{}  {} {}",
-            "│".with(self.theme.text_bright),
-            key.with(self.theme.text_muted).bold(),
+            "    {: <15} {}",
+            key.with(self.theme.text_dim),
             value.with(self.theme.text_bright)
         );
     }
 
     pub fn row_labeled(&self, icon: &str, label: &str, value: &str) {
-        if icon.is_empty() {
-            println!(
-                "{} {} {}",
-                "│".with(self.theme.text_bright),
-                label.with(self.theme.text_muted),
-                value.with(self.theme.text_bright).bold()
-            );
+        let display_icon = if icon.is_empty() {
+            "◆".to_string()
         } else {
-            println!(
-                "{} {} {} {}",
-                "│".with(self.theme.text_bright),
-                icon.with(self.theme.text),
-                label.with(self.theme.text_muted),
-                value.with(self.theme.text_bright).bold()
-            );
-        }
+            icon.to_string()
+        };
+        println!(
+            "    {} {: <14} {}",
+            display_icon.with(self.theme.warning),
+            label.with(self.theme.secondary),
+            value.with(self.theme.text_bright).bold()
+        );
     }
 
     pub fn row_metric(&self, icon: &str, label: &str, value: &str) {
-        if icon.is_empty() {
-            println!(
-                "{} {} {}",
-                "│".with(self.theme.text_bright),
-                label.with(self.theme.text_muted),
-                value.with(self.theme.text_bright).bold()
-            );
-        } else {
-            println!(
-                "{} {} {} {}",
-                "│".with(self.theme.text_bright),
-                icon.with(self.theme.text),
-                label.with(self.theme.text_muted),
-                value.with(self.theme.text_bright).bold()
-            );
-        }
+        // Removed icon for cleaner look, focusing on label alignment
+        println!(
+            "    {: <15} {}",
+            label.with(self.theme.text_dim),
+            value.with(self.theme.text_bright).bold()
+        );
     }
 
     pub fn row_metric_purple(&self, icon: &str, label: &str, value: &str) {
@@ -324,6 +325,7 @@ impl Layout {
     }
 
     pub fn footer_hint(&self, hint: &str) {
+        println!();
         println!(
             "  {} {}",
             "💡".with(self.theme.warning),
@@ -344,17 +346,12 @@ impl Layout {
     }
 
     pub fn row_list(&self, _icon: &str, content: &str) {
-        println!(
-            "{}   {}",
-            "┊".with(self.theme.text),
-            content.with(self.theme.text)
-        );
+        println!("    {}", content.with(self.theme.text));
     }
 
     pub fn success(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "┊".with(self.theme.text),
+            "    {} {}",
             "✓".with(self.theme.success),
             message.with(self.theme.success)
         );
@@ -362,17 +359,16 @@ impl Layout {
 
     pub fn success_bright(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "├╯".with(self.theme.success_bright),
+            "  {}  {} {}",
+            "╰─".with(self.theme.success_bright),
             "●".with(self.theme.success_bright),
-            message.with(self.theme.success_bright).bold()
+            message.with(self.theme.text_bright).bold()
         );
     }
 
     pub fn warning(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "┊".with(self.theme.text),
+            "    {} {}",
             "⚠".with(self.theme.warning),
             message.with(self.theme.warning)
         );
@@ -380,8 +376,7 @@ impl Layout {
 
     pub fn error(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "┊".with(self.theme.text),
+            "    {} {}",
             "✗".with(self.theme.error),
             message.with(self.theme.error)
         );
@@ -389,17 +384,16 @@ impl Layout {
 
     pub fn error_bright(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "├╯".with(self.theme.error_bright),
-            "⬤".with(self.theme.error_bright),
-            message.with(self.theme.error_bright).bold()
+            "  {}  {} {}",
+            "╰─".with(self.theme.error_bright),
+            "●".with(self.theme.error_bright),
+            message.with(self.theme.text_bright).bold()
         );
     }
 
     pub fn info(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "┊".with(self.theme.text),
+            "    {} {}",
             "ℹ".with(self.theme.info),
             message.with(self.theme.info)
         );
@@ -407,19 +401,15 @@ impl Layout {
 
     pub fn info_bright(&self, message: &str) {
         println!(
-            "{}   {} {}",
-            "├╯".with(self.theme.info_bright),
-            "◆".with(self.theme.info_bright),
+            "  {}  {} {}",
+            "╰─".with(self.theme.info_bright),
+            "●".with(self.theme.info_bright),
             message.with(self.theme.info_bright).bold()
         );
     }
 
     pub fn item_simple(&self, content: &str) {
-        println!(
-            "{}   {}",
-            "┊".with(self.theme.text),
-            content.with(self.theme.text)
-        );
+        println!("    {}", content.with(self.theme.text));
     }
 
     pub fn item_accent(&self, content: &str) {
@@ -494,11 +484,12 @@ impl Layout {
             }
             legend.push_str(&format!(
                 "{} {}",
-                icon.with(self.theme.text_muted),
-                desc.with(self.theme.text_muted)
+                icon.with(self.theme.text_bright).bold(),
+                desc.with(self.theme.text_dim)
             ));
         }
-        println!("{}   {}", "┊".with(self.theme.text), legend);
+        println!();
+        println!("  {}", legend);
     }
 
     pub fn row_diff_add(&self, content: &str) {
@@ -537,10 +528,21 @@ impl Layout {
         self.footer_hint(hint);
     }
 
+    pub fn footer_pagination(&self, shown: usize, total: usize, limit: usize) {
+        if total > limit {
+            println!();
+            println!(
+                "  {} Showing {} of {} items. Use --limit N to see more.",
+                "ℹ".with(self.theme.info),
+                shown.to_string().with(self.theme.text_bright).bold(),
+                total.to_string().with(self.theme.text_bright).bold()
+            );
+        }
+    }
+
     pub fn usage(&self, command: &str, usage: &str) {
         println!(
-            "{}   {} {}",
-            "┊".with(self.theme.text),
+            "    {} {}",
             "Usage:".with(self.theme.accent).bold(),
             format!("mnem {} {}", command, usage).with(self.theme.text)
         );
@@ -563,43 +565,43 @@ impl Layout {
     pub fn badge(&self, label: &str, value: &str) {
         println!(
             "{}  {} {}",
-            "┄".with(self.theme.text),
+            "╰─".with(self.theme.text_muted),
             format!("[{}]", label).with(self.theme.accent).bold(),
-            value.with(self.theme.text)
+            value.with(self.theme.text_bright)
         );
     }
 
     pub fn badge_success(&self, label: &str, value: &str) {
         println!(
             "{}  {} {}",
-            "┄".with(self.theme.success),
+            "╰─".with(self.theme.success),
             format!("[{}]", label).with(self.theme.success).bold(),
-            value.with(self.theme.text)
+            value.with(self.theme.text_bright)
         );
     }
 
     pub fn badge_error(&self, label: &str, value: &str) {
         println!(
             "{}  {} {}",
-            "┄".with(self.theme.error),
+            "╰─".with(self.theme.error),
             format!("[{}]", label).with(self.theme.error).bold(),
-            value.with(self.theme.text)
+            value.with(self.theme.text_bright)
         );
     }
 
     pub fn badge_info(&self, label: &str, value: &str) {
         println!(
             "{}  {} {}",
-            "┄".with(self.theme.info),
+            "╰─".with(self.theme.info),
             format!("[{}]", label).with(self.theme.info).bold(),
-            value.with(self.theme.text)
+            value.with(self.theme.text_bright)
         );
     }
 
     pub fn bullet(&self, content: &str) {
         println!(
-            "{}  • {}",
-            "│".with(self.theme.accent),
+            "{}  ● {}",
+            "│".with(self.theme.text_muted),
             content.with(self.theme.text)
         );
     }
@@ -692,27 +694,40 @@ impl Layout {
         file_path: &str,
         time: &str,
         is_latest: bool,
+        diff_stats: Option<(usize, usize)>,
         ide: &mnem_core::config::Ide,
     ) {
         let icon = if is_latest {
             "●".with(self.theme.success)
         } else {
-            "●".with(self.theme.text_muted)
+            "·".with(self.theme.text_dim)
         };
 
         let link = Hyperlink::ide_link(hash, file_path, ide);
 
+        let diff_text = if let Some((added, removed)) = diff_stats {
+            format!(
+                "{} {}",
+                format!("+{}", added).with(self.theme.success),
+                format!("-{}", removed).with(self.theme.error)
+            )
+        } else {
+            String::new()
+        };
+
         println!(
-            "{}   {}   {: <4} {} {: <16}",
-            "┊".with(self.theme.text),
+            "    {} {: <4} {} {: <10} {}",
             icon,
-            format!("#{}", index).with(self.theme.accent).bold(),
+            format!("#{}", index).with(self.theme.secondary).bold(),
             link.with(if is_latest {
                 self.theme.success
             } else {
-                self.theme.accent
-            }),
-            time.with(self.theme.text_muted),
+                self.theme.timeline_purple
+            })
+            .bold()
+            .underlined(),
+            diff_text,
+            time.with(self.theme.text_dim).italic(),
         );
     }
 

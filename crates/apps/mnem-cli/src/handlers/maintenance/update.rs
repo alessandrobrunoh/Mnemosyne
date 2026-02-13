@@ -86,18 +86,25 @@ pub fn handle_update(check_only: bool) -> Result<()> {
 
     let temp_dir = std::env::temp_dir();
 
-    // Download CLI
+    // Determine binary names based on OS
+    let (cli_name, daemon_name) = if cfg!(target_os = "windows") {
+        ("mnem.exe", "mnem-daemon.exe")
+    } else {
+        ("mnem", "mnem-daemon")
+    };
+
+    // Download CLI - preserve original filename from asset
     layout.info("Downloading mnem CLI...");
     let cli_response = client.get(&cli_asset.browser_download_url).send()?;
     let cli_bytes = cli_response.bytes()?;
-    let cli_path = temp_dir.join("mnem-new.exe");
+    let cli_path = temp_dir.join(&cli_asset.name);
     std::fs::write(&cli_path, &cli_bytes)?;
 
     // Download Daemon
     layout.info("Downloading mnem daemon...");
     let daemon_response = client.get(&daemon_asset.browser_download_url).send()?;
     let daemon_bytes = daemon_response.bytes()?;
-    let daemon_path = temp_dir.join("mnem-daemon-new.exe");
+    let daemon_path = temp_dir.join(&daemon_asset.name);
     std::fs::write(&daemon_path, &daemon_bytes)?;
 
     layout.success_bright("✓ Download complete!");
@@ -107,12 +114,25 @@ pub fn handle_update(check_only: bool) -> Result<()> {
     layout.info("Stopping daemon...");
     let _ = Command::new(&current_exe).arg("off").output();
 
-    // Replace binaries
-    let target_cli = install_dir.join("mnem.exe");
-    let target_daemon = install_dir.join("mnem-daemon.exe");
+    // Replace binaries with OS-appropriate names
+    let target_cli = install_dir.join(cli_name);
+    let target_daemon = install_dir.join(daemon_name);
 
-    std::fs::rename(&cli_path, &target_cli)?;
-    std::fs::rename(&daemon_path, &target_daemon)?;
+    // Make executable on Unix systems
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::rename(&cli_path, &target_cli)?;
+        std::fs::rename(&daemon_path, &target_daemon)?;
+        std::fs::set_permissions(&target_cli, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::set_permissions(&target_daemon, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::rename(&cli_path, &target_cli)?;
+        std::fs::rename(&daemon_path, &target_daemon)?;
+    }
 
     layout.success_bright("✓ Update installed successfully!");
     layout.empty();
@@ -124,12 +144,20 @@ pub fn handle_update(check_only: bool) -> Result<()> {
 fn find_assets(assets: &[GitHubAsset]) -> Result<(&GitHubAsset, &GitHubAsset)> {
     let cli_asset = assets
         .iter()
-        .find(|a| a.name == "mnem.exe")
+        .find(|a| {
+            let name = a.name.to_lowercase();
+            name.contains("mnem")
+                && !name.contains("daemon")
+                && (name.ends_with(".exe") || name == "mnem" || name.starts_with("mnem-"))
+        })
         .ok_or_else(|| anyhow::anyhow!("CLI asset not found"))?;
 
     let daemon_asset = assets
         .iter()
-        .find(|a| a.name == "mnem-daemon.exe")
+        .find(|a| {
+            let name = a.name.to_lowercase();
+            name.contains("mnem") && name.contains("daemon")
+        })
         .ok_or_else(|| anyhow::anyhow!("Daemon asset not found"))?;
 
     Ok((cli_asset, daemon_asset))

@@ -82,95 +82,95 @@ pub struct Palette {
 }
 
 pub const MNEMOSYNE: Palette = Palette {
-    // Primary colors - White/Grey minimal
+    // Primary colors - Vibrant Cyan
     primary: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 139,
+        g: 233,
+        b: 253,
     },
     primary_bright: Color::Rgb {
-        r: 255,
-        g: 255,
+        r: 170,
+        g: 245,
         b: 255,
     },
     secondary: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 200,
+        r: 189,
+        g: 147,
+        b: 249,
     },
     secondary_bright: Color::Rgb {
-        r: 220,
-        g: 220,
-        b: 220,
-    },
-
-    // Accent colors - White minimal
-    accent: Color::Rgb {
-        r: 255,
-        g: 255,
+        r: 210,
+        g: 180,
         b: 255,
     },
+
+    // Accent colors - Purple/Pink
+    accent: Color::Rgb {
+        r: 255,
+        g: 121,
+        b: 198,
+    },
     accent_soft: Color::Rgb {
-        r: 180,
-        g: 180,
-        b: 180,
+        r: 255,
+        g: 150,
+        b: 220,
     },
     accent_bright: Color::Rgb {
         r: 255,
-        g: 255,
+        g: 180,
         b: 255,
     },
     accent_alt: Color::Rgb {
-        r: 220,
-        g: 220,
-        b: 220,
+        r: 189,
+        g: 147,
+        b: 249,
     },
 
-    // Semantic colors - White/Grey minimal
+    // Semantic colors
     success: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 200,
+        r: 80,
+        g: 250,
+        b: 123,
     },
     success_bright: Color::Rgb {
-        r: 255,
+        r: 120,
         g: 255,
-        b: 255,
+        b: 160,
     },
     success_soft: Color::Rgb {
-        r: 150,
-        g: 150,
-        b: 150,
+        r: 60,
+        g: 200,
+        b: 100,
     },
     error: Color::Rgb {
         r: 255,
-        g: 100,
-        b: 100,
+        g: 85,
+        b: 85,
     },
     error_bright: Color::Rgb {
         r: 255,
-        g: 150,
-        b: 150,
+        g: 120,
+        b: 120,
     },
     error_soft: Color::Rgb {
         r: 200,
-        g: 100,
-        b: 100,
+        g: 60,
+        b: 60,
     },
     warning: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 150,
+        r: 255,
+        g: 184,
+        b: 108,
     },
     warning_bright: Color::Rgb {
         r: 255,
-        g: 255,
-        b: 180,
+        g: 210,
+        b: 150,
     },
     warning_soft: Color::Rgb {
-        r: 180,
-        g: 180,
-        b: 130,
+        r: 200,
+        g: 140,
+        b: 80,
     },
     info: Color::Rgb {
         r: 139,
@@ -183,53 +183,53 @@ pub const MNEMOSYNE: Palette = Palette {
         b: 255,
     },
     info_soft: Color::Rgb {
-        r: 150,
-        g: 150,
-        b: 180,
+        r: 100,
+        g: 180,
+        b: 200,
     },
 
-    // Background colors - dark grey
+    // Background colors
     background: Color::Rgb {
-        r: 30,
-        g: 30,
-        b: 30,
+        r: 40,
+        g: 42,
+        b: 54,
     },
     background_bright: Color::Rgb {
-        r: 40,
-        g: 40,
-        b: 40,
+        r: 68,
+        g: 71,
+        b: 90,
     },
     background_dim: Color::Rgb {
-        r: 20,
-        g: 20,
-        b: 20,
+        r: 30,
+        g: 30,
+        b: 40,
     },
     surface: Color::Rgb {
-        r: 35,
-        g: 35,
-        b: 35,
+        r: 50,
+        g: 50,
+        b: 70,
     },
     surface_elevated: Color::Rgb {
-        r: 45,
-        g: 45,
-        b: 45,
+        r: 70,
+        g: 70,
+        b: 95,
     },
 
-    // Foreground/text colors - White focused
+    // Foreground/text colors
     foreground: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 248,
+        g: 248,
+        b: 242,
     },
     text: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 248,
+        g: 248,
+        b: 242,
     },
     text_dim: Color::Rgb {
-        r: 150,
-        g: 150,
-        b: 150,
+        r: 144,
+        g: 144,
+        b: 144,
     },
     text_bright: Color::Rgb {
         r: 255,
@@ -237,159 +237,159 @@ pub const MNEMOSYNE: Palette = Palette {
         b: 255,
     },
     text_muted: Color::Rgb {
-        r: 70,
-        g: 70,
-        b: 70,
+        r: 98,
+        g: 114,
+        b: 164,
     },
 
-    // Border colors - White
+    // Border colors
     border: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 68,
+        g: 71,
+        b: 90,
     },
     border_dim: Color::Rgb {
-        r: 100,
-        g: 100,
-        b: 100,
+        r: 50,
+        g: 50,
+        b: 70,
     },
     border_focus: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 189,
+        g: 147,
+        b: 249,
     },
     border_accent: Color::Rgb {
         r: 255,
-        g: 255,
-        b: 255,
+        g: 121,
+        b: 198,
     },
 
-    // Special UI elements - White
+    // Special UI elements
     active: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 200,
+        r: 80,
+        g: 250,
+        b: 123,
     },
     highlight: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 241,
+        g: 250,
+        b: 140,
     },
     highlight_soft: Color::Rgb {
-        r: 180,
-        g: 180,
-        b: 180,
+        r: 200,
+        g: 200,
+        b: 100,
     },
     selection: Color::Rgb {
-        r: 80,
-        g: 80,
-        b: 80,
+        r: 68,
+        g: 71,
+        b: 90,
     },
     link: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 255,
+        r: 139,
+        g: 233,
+        b: 253,
     },
     link_visited: Color::Rgb {
-        r: 180,
-        g: 180,
-        b: 220,
+        r: 189,
+        g: 147,
+        b: 249,
     },
 
-    // Code/Syntax colors - White/Grey minimal
+    // Code/Syntax colors
     code_keyword: Color::Rgb {
         r: 255,
-        g: 255,
-        b: 255,
+        g: 121,
+        b: 198,
     },
     code_string: Color::Rgb {
-        r: 220,
-        g: 220,
-        b: 220,
+        r: 241,
+        g: 250,
+        b: 140,
     },
     code_number: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 200,
+        r: 189,
+        g: 147,
+        b: 249,
     },
     code_comment: Color::Rgb {
-        r: 120,
-        g: 120,
-        b: 120,
+        r: 98,
+        g: 114,
+        b: 164,
     },
     code_function: Color::Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
+        r: 80,
+        g: 250,
+        b: 123,
     },
     code_type: Color::Rgb {
-        r: 220,
-        g: 220,
-        b: 220,
+        r: 139,
+        g: 233,
+        b: 253,
     },
 
-    // Diff colors - White minimal
+    // Diff colors
     diff_add: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 200,
+        r: 80,
+        g: 250,
+        b: 123,
     },
     diff_add_bg: Color::Rgb {
-        r: 40,
-        g: 40,
-        b: 40,
+        r: 50,
+        g: 70,
+        b: 50,
     },
     diff_remove: Color::Rgb {
         r: 255,
-        g: 150,
-        b: 150,
+        g: 85,
+        b: 85,
     },
     diff_remove_bg: Color::Rgb {
-        r: 50,
-        g: 30,
-        b: 30,
+        r: 70,
+        g: 50,
+        b: 50,
     },
     diff_context: Color::Rgb {
-        r: 120,
-        g: 120,
-        b: 120,
+        r: 98,
+        g: 114,
+        b: 164,
     },
     diff_header: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 200,
+        r: 248,
+        g: 248,
+        b: 242,
     },
 
-    // Timeline/History colors - White/Grey
+    // Timeline/History colors
     timeline_cyan: Color::Rgb {
-        r: 200,
-        g: 200,
-        b: 220,
+        r: 139,
+        g: 233,
+        b: 253,
     },
     timeline_pink: Color::Rgb {
-        r: 220,
-        g: 200,
-        b: 220,
+        r: 255,
+        g: 121,
+        b: 198,
     },
     timeline_orange: Color::Rgb {
-        r: 220,
-        g: 210,
-        b: 190,
+        r: 255,
+        g: 184,
+        b: 108,
     },
     timeline_yellow: Color::Rgb {
-        r: 220,
-        g: 220,
-        b: 180,
+        r: 241,
+        g: 250,
+        b: 140,
     },
     timeline_green: Color::Rgb {
-        r: 200,
-        g: 220,
-        b: 200,
+        r: 80,
+        g: 250,
+        b: 123,
     },
     timeline_purple: Color::Rgb {
-        r: 220,
-        g: 200,
-        b: 220,
+        r: 189,
+        g: 147,
+        b: 249,
     },
 };
 

@@ -9,7 +9,7 @@ mod ui_components;
 
 #[derive(Parser)]
 #[command(name = "mnem")]
-#[command(version = "0.1.0")]
+#[command(version = "0.1.1")]
 #[command(about = "Mnemosyne - Local history companion", long_about = None)]
 #[command(styles = styles())]
 struct Cli {
@@ -26,7 +26,7 @@ fn styles() -> clap::builder::Styles {
         .header(AnsiColor::Magenta.on_default() | Effects::BOLD)
         .usage(AnsiColor::Magenta.on_default() | Effects::BOLD)
         .literal(AnsiColor::Cyan.on_default() | Effects::BOLD)
-        .placeholder(AnsiColor::Green.on_default())
+        .placeholder(AnsiColor::Yellow.on_default())
 }
 
 #[derive(Subcommand)]
@@ -122,20 +122,22 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Some(project_path) = cli.project {
+        std::env::set_current_dir(project_path)?;
+    }
+
     match cli.command {
-        Some(Commands::On { auto }) => handlers::on::handle_on(auto),
-        Some(Commands::Off) => handlers::off::handle_off(),
-        Some(Commands::Status) => handlers::status::handle_status(),
-        Some(Commands::Track { list, remove, id }) => {
-            handlers::track::handle_track(list, remove, id)
-        }
+        Some(Commands::On { auto }) => handlers::handle_on(auto),
+        Some(Commands::Off) => handlers::handle_off(),
+        Some(Commands::Status) => handlers::handle_status(),
+        Some(Commands::Track { list, remove, id }) => handlers::handle_track(list, remove, id),
         Some(Commands::H {
             file,
             limit,
             timeline,
             since,
             branch,
-        }) => handlers::history_new::handle_h(file, limit, timeline, since, branch),
+        }) => handlers::handle_h(file, limit, timeline, since, branch),
         Some(Commands::R {
             file,
             version,
@@ -146,7 +148,7 @@ fn main() -> Result<()> {
             checkpoint,
             branch,
             limit,
-        }) => handlers::restore::handle_r(
+        }) => handlers::handle_r(
             file, version, list, undo, to, symbol, checkpoint, branch, limit,
         ),
         Some(Commands::S {
@@ -154,18 +156,16 @@ fn main() -> Result<()> {
             file,
             limit,
             semantic,
-        }) => handlers::search::handle_s(query, file, limit, semantic),
-        Some(Commands::Info { project }) => handlers::info::handle_info(project),
+        }) => handlers::handle_s(query, file, limit, semantic),
+        Some(Commands::Info { project }) => handlers::handle_info(project),
         Some(Commands::Gc {
             keep,
             dry_run,
             aggressive,
-        }) => handlers::gc::handle_gc(keep, dry_run, aggressive),
-        Some(Commands::Config { get, set, reset }) => {
-            handlers::config::handle_config(get, set, reset)
-        }
-        Some(Commands::Uninstall) => handlers::uninstall::handle_uninstall(),
-        Some(Commands::Update { check_only }) => handlers::update::handle_update(check_only),
-        None => handlers::status::handle_status(),
+        }) => handlers::handle_gc(keep, dry_run, aggressive),
+        Some(Commands::Config { get, set, reset }) => handlers::handle_config(get, set, reset),
+        Some(Commands::Uninstall) => handlers::handle_uninstall(),
+        Some(Commands::Update { check_only }) => handlers::handle_update(check_only),
+        None => handlers::handle_status(),
     }
 }

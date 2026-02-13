@@ -1,5 +1,7 @@
+
 use anyhow::Result;
 
+use crate::handlers::files::history::compute_diff_stats;
 use crate::ui::Layout;
 use mnem_core::storage::Repository;
 use std::collections::BTreeMap;
@@ -189,6 +191,10 @@ pub fn handle_r(
                         .cloned()
                         .unwrap_or_else(|| cwd.join(clean_path).to_string_lossy().to_string());
 
+                    let prev_snap = snaps.get(i + 1);
+                    let prev_hash = prev_snap.map(|s| s.content_hash.as_str());
+                    let diff_stats = compute_diff_stats(&repo, &snap.content_hash, prev_hash);
+
                     layout.row_version_with_link(
                         i + 1,
                         hash_short,
@@ -196,6 +202,7 @@ pub fn handle_r(
                         &file_to_open,
                         &date_time,
                         i == 0,
+                        diff_stats,
                         &ide,
                     );
                 }

@@ -1,6 +1,7 @@
 use crate::ui::Layout;
 use anyhow::Result;
 use mnem_core::storage::Repository;
+use similar::{ChangeTag, TextDiff};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -80,6 +81,15 @@ fn handle_file_history(f: &str, limit: usize, layout: &Layout, repo: &Repository
     if history.is_empty() {
         layout.warning("No history found.");
     } else {
+        layout.legend(&[
+            ("● Is Latest", ""),
+            ("· Past", ""),
+            ("A", "Added"),
+            ("M", "Modified"),
+            ("D", "Deleted"),
+        ]);
+        println!();
+
         for (i, snap) in history.iter().take(limit).enumerate() {
             let hash_short = if snap.content_hash.len() >= 8 {
                 &snap.content_hash[..8]
@@ -96,8 +106,14 @@ fn handle_file_history(f: &str, limit: usize, layout: &Layout, repo: &Repository
                 ""
             };
 
-            layout.row_history_compact(hash_short, "M", clean_path, time_only, i == 0);
+            // Calculate diff stats
+            let prev_snap = history.get(i + 1);
+            let prev_hash = prev_snap.map(|s| s.content_hash.as_str());
+            let diff_stats = compute_diff_stats(repo, &snap.content_hash, prev_hash);
+
+            layout.row_history_compact(hash_short, "M", clean_path, time_only, i == 0, diff_stats);
         }
+        layout.footer_pagination(history.len().min(limit), history.len(), limit);
     }
     layout.section_end();
     layout.footer("Shift+Click the hash or 'mnem open' to view in your IDE.");
@@ -137,7 +153,7 @@ fn handle_dashboard_view(
                 };
 
                 let msg = desc.as_deref().unwrap_or("No description");
-                layout.row_history_compact(hash_short, "CP", msg, &date_time, false);
+                layout.row_history_compact(hash_short, "CP", msg, &date_time, false, None);
             }
         } else {
             layout.item_simple("No checkpoints");
@@ -159,7 +175,7 @@ fn handle_dashboard_view(
                 };
 
                 let desc = format!("{} files  {} - {}", files, author, msg);
-                layout.row_history_compact(hash_short, "GIT", &desc, &date_time, false);
+                layout.row_history_compact(hash_short, "GIT", &desc, &date_time, false, None);
             }
         } else {
             layout.item_simple("No commits");
@@ -195,12 +211,69 @@ fn handle_dashboard_view(
                 p.to_string()
             };
 
-            layout.row_history_compact(hash_short, "M", &display_path, time_only, i == 0);
+            let mut prev_hash = None;
+            for next_snap in snaps.iter().skip(i + 1) {
+                if next_snap.file_path == snap.file_path {
+                    prev_hash = Some(next_snap.content_hash.as_str());
+                    break;
+                }
+            }
+
+            let diff_stats = compute_diff_stats(repo, &snap.content_hash, prev_hash);
+
+            layout.row_history_compact(
+                hash_short,
+                "M",
+                &display_path,
+                time_only,
+                i == 0,
+                diff_stats,
+            );
         }
         layout.section_end();
     }
 
+    layout.legend(&[
+        ("● Latest", ""),
+        ("· Past", ""),
+        ("M", "Mod"),
+        ("C", "Checkpt"),
+        ("G", "Commit"),
+    ]);
+
     layout.footer("Shift+Click the hash or 'mnem open' to view in your IDE.");
+    layout.footer_pagination(history.len().min(limit), history.len(), limit);
 
     Ok(())
+}
+
+pub fn compute_diff_stats(
+    repo: &Repository,
+    current_hash: &str,
+    prev_hash: Option<&str>,
+) -> Option<(usize, usize)> {
+    let current_content = repo.get_content(current_hash).ok()?;
+    let prev_content = if let Some(p) = prev_hash {
+        repo.get_content(p).ok().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let current_str = String::from_utf8_lossy(&current_content);
+    let prev_str = String::from_utf8_lossy(&prev_content);
+
+    let diff = TextDiff::from_lines(&prev_str, &current_str);
+
+    let mut added = 0;
+    let mut removed = 0;
+
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Insert => added += 1,
+            ChangeTag::Delete => removed += 1,
+            _ => {}
+        }
+    }
+
+    Some((added, removed))
 }

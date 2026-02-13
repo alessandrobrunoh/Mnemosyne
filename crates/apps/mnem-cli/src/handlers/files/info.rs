@@ -1,3 +1,4 @@
+
 use anyhow::Result;
 
 use crate::ui::Layout;
@@ -56,7 +57,7 @@ pub fn handle_info(_project: Option<String>) -> Result<()> {
     layout.row_labeled("◫", "Path", &repo.project.path);
     layout.row_labeled("◆", "ID", &repo.project.id);
     layout.row_metric(
-        "◫",
+        "",
         "Size",
         &format!("{:.2} MB", size as f64 / 1024.0 / 1024.0),
     );
@@ -64,9 +65,9 @@ pub fn handle_info(_project: Option<String>) -> Result<()> {
     layout.section_end();
 
     layout.section_branch("st", "Activity Summary");
-    layout.row_metric("◫", "Total Snapshots", &history.len().to_string());
-    layout.row_metric_purple("◆", "Unique Files", &unique_files.len().to_string());
-    layout.row_metric_orange("◷", "Branches", &branches.len().to_string());
+    layout.row_metric("", "Total Snapshots", &history.len().to_string());
+    layout.row_metric("", "Unique Files", &unique_files.len().to_string());
+    layout.row_metric("", "Branches", &branches.len().to_string());
 
     layout.section_end();
 
@@ -86,20 +87,20 @@ pub fn handle_info(_project: Option<String>) -> Result<()> {
                 "txt" => "📄",
                 _ => "📄",
             };
-            layout.item_simple(&format!("{} .{}  ({} files)", icon, ext, count));
+            layout.row_key_value(&format!("{} .{}", icon, ext), &format!("{} files", count));
         }
         layout.section_end();
     }
 
     if let Ok(cps) = repo.list_checkpoints() {
         if !cps.is_empty() {
-            layout.row_metric_purple("◷", "Checkpoints", &cps.len().to_string());
+            layout.row_metric("", "Checkpoints", &cps.len().to_string());
         }
     }
 
     if let Ok(commits) = repo.list_commits() {
         if !commits.is_empty() {
-            layout.row_metric_orange("◫", "Git Commits", &commits.len().to_string());
+            layout.row_metric("", "Git Commits", &commits.len().to_string());
         }
     }
 
