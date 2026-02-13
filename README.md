@@ -4,10 +4,10 @@
 
 ### Local History for Developers
 
-[![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Never lose code again.** Automatic snapshots on every save, semantic code understanding, and intelligent restore—all local, zero dependencies.
+**Never lose code again.** Automatic snapshots on every save, semantic code understanding, and intelligent restore—all local, zero cloud.
 
 </div>
 
@@ -15,10 +15,12 @@
 
 ## Why Mnemosyne?
 
-- **Git only tracks commits** — Mnemosyne captures every save, every refactor, every experiment
-- **Instant restore** — recover any previous version in milliseconds  
-- **Per-project storage** — each project has its own `.mnemosyne/` folder (portable!)
-- **Semantic understanding** — Tree-sitter powered AST parsing
+| Problem | Mnemosyne Solution |
+|--------|-------------------|
+| Git only tracks commits | Captures every save |
+| Lost work between commits | Instant restore |
+| Can't remember what changed | Full history with diffs |
+| Large backup files | Deduplicated storage (10-100x smaller) |
 
 ---
 
@@ -36,15 +38,15 @@ mnem track
 mnem h
 
 # 4. Restore files
-mnem r                    # Interactive restore
-mnem r --version 5       # Restore to version 5
+mnem r                    # Interactive
+mnem r --version 5       # Specific version
 ```
 
 ---
 
 ## Installation
 
-### Windows
+### Windows (PowerShell)
 ```powershell
 irm https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1 | iex
 ```
@@ -57,28 +59,47 @@ curl -fsSL https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scr
 ### From Source
 ```bash
 git clone https://github.com/alessandrobrunoh/Mnemosyne.git
-cd Mnemosyne
+cd Mnemosyne/mnemosyne
 cargo build --release -p mnem-cli -p mnem-daemon
-# Add binaries to your PATH
+# Copy binaries to your PATH
 ```
 
 ---
 
 ## Commands
 
+### Daemon
 | Command | Description |
 |--------|-------------|
-| `mnem on` | Start the daemon |
-| `mnem off` | Stop the daemon |
-| `mnem status` | Show daemon status & stats |
+| `mnem on` | Start daemon |
+| `mnem off` | Stop daemon |
+| `mnem status` | Show status & stats |
+
+### Tracking
+| Command | Description |
+|--------|-------------|
 | `mnem track` | Track current directory |
 | `mnem track --list` | List tracked projects |
-| `mnem h` | View file history |
+
+### History
+| Command | Description |
+|--------|-------------|
+| `mnem h` | View history |
 | `mnem h --branch main` | Filter by branch |
 | `mnem h --limit 20` | Limit results |
+| `mnem h --timeline` | Timeline view |
+
+### Search & Restore
+| Command | Description |
+|--------|-------------|
 | `mnem s <query>` | Search in history |
-| `mnem r` | Restore files (interactive) |
+| `mnem r` | Interactive restore |
 | `mnem r --version 5` | Restore to version 5 |
+| `mnem r --undo` | Undo last restore |
+
+### Info & Maintenance
+| Command | Description |
+|--------|-------------|
 | `mnem info` | Project statistics |
 | `mnem gc` | Garbage collection |
 | `mnem config` | Manage configuration |
@@ -87,25 +108,41 @@ cargo build --release -p mnem-cli -p mnem-daemon
 
 ## How It Works
 
-Each project stores its data locally:
+### Per-Project Storage
+
+Each project stores its data locally in `.mnemosyne/`:
 
 ```
-project/
-├── .mnemosyne/          # Local storage (portable!)
+my-project/
+├── .mnemosyne/          # All data lives here!
 │   ├── tracked          # Project ID
-│   ├── db/             # SQLite database
+│   ├── db/             # SQLite (snapshots, symbols)
 │   └── cas/            # Content-addressable storage
-└── src/                # Your code
+├── src/
+│   └── main.rs
+└── Cargo.toml
 ```
 
 **Benefits:**
-- Portable — copy `.mnemosyne/` to move history
-- Delete `.mnemosyne/` to remove all history
-- Works offline — no cloud required
+- ✅ Portable — copy project to move history
+- ✅ Delete `.mnemosyne/` to remove all history  
+- ✅ Works offline — no cloud required
+- ✅ No global state pollution
+
+### Semantic Understanding
+
+Mnemosyne uses **Tree-sitter** to understand code structure:
+
+- Tracks **functions, classes, structs** — not just lines
+- Survives **renames and refactors**
+- **Deduplicates** using BLAKE3 hashing
+- **Compresses** with Zstd
 
 ---
 
 ## Configuration
+
+### Project Ignore
 
 Create `.mnemignore` in your project root:
 
@@ -113,19 +150,58 @@ Create `.mnemignore` in your project root:
 target/
 node_modules/
 *.log
+*.tmp
+build/
+dist/
 ```
 
-Global config: `~/.mnemosyne/config.toml`
+### Global Config
+
+`~/.mnemosyne/config.toml`:
+
+```toml
+[daemon]
+auto_start = true
+poll_interval_ms = 500
+
+[storage]
+compression = true
+deduplicate = true
+
+[ignore]
+global = ["*.log", "*.tmp"]
+```
 
 ---
 
 ## Features
 
-- **Auto snapshots** — every file save is captured
-- **Branch tracking** — history organized by Git branches  
-- **Deduplication** — BLAKE3 + Zstd compression
-- **Hunk restore** — restore specific code blocks
-- **Search** — full-text search across history
+- **Auto Snapshots** — every file save captured
+- **Branch Tracking** — history by Git branch
+- **Semantic Deltas** — understands code structure
+- **Instant Restore** — millisecond recovery
+- **Full-Text Search** — search across all history
+- **Deduplication** — 10-100x smaller than full copies
+- **Symbol History** — track function/class evolution
+- **IDE Integration** — open versions in your editor
+
+---
+
+## Use Cases
+
+1. **Recover lost work** — "I accidentally deleted this function"
+2. **See evolution** — "How did I implement this feature?"
+3. **Compare approaches** — "What did I try before?"
+4. **Debug regressions** — "When did this break?"
+5. **Share snapshots** — Send a version to a colleague
+
+---
+
+## Integrations
+
+- **VSCode** — Coming soon
+- **Zed** — Built-in Mnemosyne support
+- **CLI** — Full-featured command line
 
 ---
 
