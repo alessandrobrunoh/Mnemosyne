@@ -103,11 +103,17 @@ pub fn handle_track(list: bool, _remove: bool, _id: Option<String>) -> Result<()
     layout.badge_success("OK", "Tracking started");
 
     if daemon_running() {
-        if let Ok(mut client) = mnem_core::client::DaemonClient::connect() {
-            if let Err(e) = client.call(methods::PROJECT_RELOAD, serde_json::Value::Null) {
-                layout.warning(&format!("Could not reload daemon: {}", e));
-            } else {
-                layout.info_bright("✓ Daemon reloaded with new project");
+        match mnem_core::client::DaemonClient::connect() {
+            Ok(mut client) => match client.call(methods::PROJECT_RELOAD, serde_json::Value::Null) {
+                Ok(_) => {
+                    layout.info_bright("✓ Daemon reloaded with new project");
+                }
+                Err(e) => {
+                    layout.warning(&format!("Could not reload daemon: {}", e));
+                }
+            },
+            Err(e) => {
+                layout.warning(&format!("Could not connect to daemon: {}", e));
             }
         }
     }

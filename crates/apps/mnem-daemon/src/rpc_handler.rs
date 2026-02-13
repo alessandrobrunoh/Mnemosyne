@@ -18,6 +18,7 @@ const UNRESTRICTED_METHODS: &[&str] = &[
     protocol::methods::INITIALIZE,
     protocol::methods::STATUS,
     protocol::methods::DAEMON_GET_STATUS,
+    protocol::methods::PROJECT_RELOAD,
 ];
 
 pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> JsonRpcResponse {
