@@ -110,6 +110,13 @@ enum Commands {
         #[arg(long)]
         reset: bool,
     },
+    #[command(about = "Uninstall mnem")]
+    Uninstall,
+    #[command(about = "Check for updates and update")]
+    Update {
+        #[arg(long)]
+        check_only: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -157,6 +164,8 @@ fn main() -> Result<()> {
         Some(Commands::Config { get, set, reset }) => {
             handlers::config::handle_config(get, set, reset)
         }
+        Some(Commands::Uninstall) => handlers::uninstall::handle_uninstall(),
+        Some(Commands::Update { check_only }) => handlers::update::handle_update(check_only),
         None => handlers::status::handle_status(),
     }
 }

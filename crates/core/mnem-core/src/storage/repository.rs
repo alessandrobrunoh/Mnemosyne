@@ -19,6 +19,16 @@ pub struct Repository {
 }
 
 impl Repository {
+    /// Get compression enabled config
+    pub fn is_compression_enabled(&self) -> bool {
+        self.config
+            .lock()
+            .map(|c| c.config.compression_enabled)
+            .unwrap_or(true)
+    }
+}
+
+impl Repository {
     /// Initialize the repository for the current project.
     /// Detects the project root by looking for `.git`, falling back to CWD.
     /// Uses `~/.mnemosyne` as the global storage root.
@@ -364,7 +374,8 @@ temp/
         let branch = self.get_current_branch();
 
         // Ensure the full file content is stored in CAS for quick retrieval/preview (audit 5.4)
-        self.fs.write(&content)?;
+        let enable_compression = self.is_compression_enabled();
+        self.fs.write(&content, enable_compression)?;
 
         let snapshot_id =
             self.db
@@ -377,7 +388,7 @@ temp/
 
         for chunk in chunks {
             let chunk_hash = blake3::hash(&chunk.data).to_hex().to_string();
-            self.fs.write(&chunk.data)?; // Filesystem CAS
+            self.fs.write(&chunk.data, enable_compression)?; // Filesystem CAS
             self.db.insert_chunk(&chunk_hash, &chunk.data, "raw")?; // DB metadata
             chunks_info.push((chunk_hash, chunk.offset, chunk.length));
         }

@@ -50,14 +50,6 @@ impl Command for ConfigCommand {
                     format!("{} MB", cm.config.max_file_size_mb),
                 ),
                 (
-                    "Use Gitignore",
-                    if cm.config.use_gitignore {
-                        "yes".green().to_string()
-                    } else {
-                        "no".red().to_string()
-                    },
-                ),
-                (
                     "Use Mnemignore",
                     if cm.config.use_mnemosyneignore {
                         "yes".green().to_string()
@@ -84,7 +76,6 @@ impl Command for ConfigCommand {
                 "retention_days" => cm.config.retention_days = val.parse()?,
                 "compression" => cm.config.compression_enabled = val.parse()?,
                 "max_file_size_mb" => cm.config.max_file_size_mb = val.parse()?,
-                "use_gitignore" => cm.config.use_gitignore = val.parse()?,
                 "use_mnemignore" => cm.config.use_mnemosyneignore = val.parse()?,
                 "theme_index" => cm.config.theme_index = val.parse()?,
                 "ide" => {

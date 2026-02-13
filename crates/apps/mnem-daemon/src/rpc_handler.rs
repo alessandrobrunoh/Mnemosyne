@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use serde_json::json;
-use log::{error, info};
+use log::{error, info, warn};
 use std::sync::atomic::Ordering;
 
 use mnem_core::env::get_base_dir;
@@ -18,6 +18,7 @@ const UNRESTRICTED_METHODS: &[&str] = &[
     protocol::methods::INITIALIZE,
     protocol::methods::STATUS,
     protocol::methods::DAEMON_GET_STATUS,
+    protocol::methods::PROJECT_RELOAD,
 ];
 
 pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> JsonRpcResponse {
@@ -181,6 +182,69 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             JsonRpcResponse::success(req.id, serde_json::to_value(status).unwrap_or(json!({})))
         }
 
+        protocol::methods::PROJECT_RELOAD => {
+            info!("Reloading projects from registry...");
+            
+            let base_dir = match get_base_dir() {
+                Ok(d) => d,
+                Err(e) => return JsonRpcResponse::error(req.id, -32603, format!("Failed to get base dir: {}", e)),
+            };
+            
+            let registry = match mnem_core::storage::registry::ProjectRegistry::new(&base_dir) {
+                Ok(r) => r,
+                Err(e) => return JsonRpcResponse::error(req.id, -32603, format!("Failed to load registry: {}", e)),
+            };
+            
+            let projects = registry.list_projects();
+            let total = projects.len();
+            let mut loaded = 0;
+            
+            for project in projects {
+                let project_path = std::path::PathBuf::from(&project.path);
+                if !project_path.exists() {
+                    continue;
+                }
+                
+                // Skip if already loaded
+                if state.repos.contains_key(&project.path) {
+                    loaded += 1;
+                    continue;
+                }
+                
+                match Repository::open(base_dir.clone(), project_path.clone()) {
+                    Ok(repo) => {
+                        let repo = Arc::new(repo);
+                        let monitor = Arc::new(Monitor::with_state(project_path.clone(), repo.clone(), state.clone()));
+                        
+                        let scan_path = project.path.clone();
+                        let monitor_scan = monitor.clone();
+                        tokio::task::spawn_blocking(move || {
+                            if let Err(e) = monitor_scan.initial_scan() {
+                                error!("Initial scan failed for {}: {}", scan_path, e);
+                            }
+                        });
+                        
+                        let monitor_start = monitor.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = monitor_start.start().await {
+                                error!("Monitor loop failed: {}", e);
+                            }
+                        });
+                        
+                        state.repos.insert(project.path.clone(), repo);
+                        state.monitors.insert(project.path.clone(), monitor);
+                        loaded += 1;
+                        info!("Reloaded project: {}", project.path);
+                    }
+                    Err(e) => {
+                        warn!("Failed to reload project {}: {}", project.path, e);
+                    }
+                }
+            }
+            
+            JsonRpcResponse::success(req.id, json!({"loaded": loaded, "total": total}))
+        }
+
         protocol::methods::WATCH | protocol::methods::PROJECT_WATCH => {
             let params: protocol::WatchParams = match serde_json::from_value(req.params.clone()) {
                 Ok(p) => p,
@@ -280,8 +344,41 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
                 if file_path.starts_with(project_path) {
+                    // Try cache first
+                    if let Some(cached) = state.get_cached_history(&params.file_path) {
+                        let infos: Vec<protocol::SnapshotInfo> = cached
+                            .into_iter()
+                            .filter(|sn| {
+                                if let Some(ref b) = params.branch {
+                                    sn.git_branch.as_ref() == Some(b)
+                                } else {
+                                    true
+                                }
+                            })
+                            .map(|sn| {
+                                let commit_message = sn.commit_hash.as_ref().and_then(|h| {
+                                    repo.db.get_git_commit(h).ok().flatten().map(|(msg, _, _)| msg)
+                                });
+                                protocol::SnapshotInfo {
+                                    id: sn.id,
+                                    file_path: sn.file_path,
+                                    timestamp: sn.timestamp,
+                                    content_hash: sn.content_hash,
+                                    git_branch: sn.git_branch,
+                                    commit_hash: sn.commit_hash,
+                                    commit_message,
+                                }
+                            })
+                            .collect();
+                        return JsonRpcResponse::success(req.id, serde_json::to_value(infos).unwrap_or(json!([])));
+                    }
+
+                    // Cache miss - fetch from database
                     match repo.get_history(&params.file_path) {
                         Ok(history) => {
+                            // Cache the result
+                            state.cache_history(params.file_path.clone(), history.clone());
+                            
                             let infos: Vec<protocol::SnapshotInfo> = history
                                 .into_iter()
                                 .filter(|sn| {

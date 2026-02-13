@@ -11,7 +11,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # Internal crates
-semantic-delta-protocol = { path = "../semantic-delta-protocol" }
+semantic-delta-protocol = { git = "https://github.com/alessandrobrunoh/Semantic-Delta-Protocol.git" }
 mnem-core = { path = "crates/core/mnem-core" }
 mnem-cli = { path = "crates/apps/mnem-cli" }
 
@@ -67,6 +67,7 @@ syntect = "5.3"
 ratatui = "0.26"
 crossterm = "0.27"
 windows-sys = "0.52"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 mnem-tui = { path = "crates/apps/mnem-tui" }
 mnem-daemon = { path = "crates/apps/mnem-daemon" }
 mnem-macros = { path = "crates/core/mnem-macros" }

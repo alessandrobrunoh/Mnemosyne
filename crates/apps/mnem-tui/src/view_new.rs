@@ -498,15 +498,6 @@ fn render_settings_view(f: &mut Frame, area: Rect, state: &AppState) {
             }
             .to_string(),
         ),
-        (
-            "Gitignore",
-            if state.config.use_gitignore {
-                "Active"
-            } else {
-                "Inactive"
-            }
-            .to_string(),
-        ),
         ("Theme", THEMES[state.config.theme_index].name.clone()),
         ("IDE", state.config.ide.as_str().to_string()),
     ];

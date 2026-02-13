@@ -1,11 +1,16 @@
 use crate::Monitor;
 use dashmap::DashMap;
+use lru::LruCache;
+use mnem_core::models::Snapshot;
 use mnem_core::protocol::{ClientCapabilities, ServerCapabilities};
 use mnem_core::Repository;
 use parking_lot::RwLock;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+
+const HISTORY_CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InitializationState {
@@ -26,6 +31,9 @@ pub struct DaemonState {
 
     /// Active repositories keyed by project path (Concurrent Map)
     pub repos: DashMap<String, Arc<Repository>>,
+
+    /// LRU cache for history queries (file_path -> history results)
+    pub history_cache: RwLock<LruCache<String, Vec<Snapshot>>>,
 
     /// Metrics (Atomics for zero-lock updates)
     pub total_requests: AtomicU64,
@@ -52,6 +60,7 @@ impl DaemonState {
             auth_token,
             monitors: DashMap::new(),
             repos: DashMap::new(),
+            history_cache: RwLock::new(LruCache::new(HISTORY_CACHE_SIZE)),
             total_requests: AtomicU64::new(0),
             total_processing_time_us: AtomicU64::new(0),
             total_saves: AtomicU64::new(0),
@@ -98,5 +107,30 @@ impl DaemonState {
 
         self.cached_total_size.store(total, Ordering::Relaxed);
         total
+    }
+
+    /// Get cached history for a file path
+    pub fn get_cached_history(&self, file_path: &str) -> Option<Vec<Snapshot>> {
+        let mut cache = self.history_cache.write();
+        cache.get(file_path).cloned()
+    }
+
+    /// Cache history for a file path
+    pub fn cache_history(&self, file_path: String, history: Vec<Snapshot>) {
+        let mut cache = self.history_cache.write();
+        cache.push(file_path, history);
+    }
+
+    /// Clear history cache (useful after file changes)
+    pub fn invalidate_history_cache(&self, file_path: Option<&str>) {
+        let mut cache = self.history_cache.write();
+        match file_path {
+            Some(path) => {
+                cache.pop(path);
+            }
+            None => {
+                cache.clear();
+            }
+        }
     }
 }

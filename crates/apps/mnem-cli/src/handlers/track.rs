@@ -5,6 +5,7 @@ use crate::ui::Layout;
 pub fn handle_track(list: bool, _remove: bool, _id: Option<String>) -> Result<()> {
     use mnem_core::client::daemon_running;
     use mnem_core::env::get_base_dir;
+    use mnem_core::protocol::methods;
     use mnem_core::storage::registry::ProjectRegistry;
 
     let layout = Layout::new();
@@ -100,6 +101,22 @@ pub fn handle_track(list: bool, _remove: bool, _id: Option<String>) -> Result<()
     layout.row_labeled("◆", "ID", &project.id);
     layout.empty();
     layout.badge_success("OK", "Tracking started");
+
+    if daemon_running() {
+        match mnem_core::client::DaemonClient::connect() {
+            Ok(mut client) => match client.call(methods::PROJECT_RELOAD, serde_json::Value::Null) {
+                Ok(_) => {
+                    layout.info_bright("✓ Daemon reloaded with new project");
+                }
+                Err(e) => {
+                    layout.warning(&format!("Could not reload daemon: {}", e));
+                }
+            },
+            Err(e) => {
+                layout.warning(&format!("Could not connect to daemon: {}", e));
+            }
+        }
+    }
 
     Ok(())
 }

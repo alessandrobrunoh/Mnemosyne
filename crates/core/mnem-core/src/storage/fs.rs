@@ -109,7 +109,7 @@ impl CasStorage {
 
     /// Streaming write: Reads from input, compresses, hashes, and writes atomically.
     /// Returns the hash of the ORIGINAL content.
-    pub fn write_stream(&self, input_path: &Path) -> AppResult<String> {
+    pub fn write_stream(&self, input_path: &Path, enable_compression: bool) -> AppResult<String> {
         let mut input_file = fs::File::open(input_path).map_err(AppError::IoGeneric)?;
 
         // Read the first chunk to detect if already compressed
@@ -117,11 +117,12 @@ impl CasStorage {
         let first_count = input_file
             .read(&mut first_chunk)
             .map_err(AppError::IoGeneric)?;
-        let compression_level = if is_already_compressed(&first_chunk[..first_count]) {
-            0
-        } else {
-            3
-        };
+        let compression_level =
+            if !enable_compression || is_already_compressed(&first_chunk[..first_count]) {
+                0
+            } else {
+                3
+            };
 
         // Create a temporary file in dedicated tmp dir
         let temp_dir = self.base_dir.join("tmp");
@@ -174,7 +175,7 @@ impl CasStorage {
     }
 
     /// Write content from a byte slice. Uses the same sharding and atomic write strategy.
-    pub fn write(&self, content: &[u8]) -> AppResult<String> {
+    pub fn write(&self, content: &[u8], enable_compression: bool) -> AppResult<String> {
         let hash = blake3::hash(content).to_hex().to_string();
         let object_path = self.object_path(&hash);
 
@@ -186,7 +187,7 @@ impl CasStorage {
         // Optimization: Use Zstd with a higher compression level for text chunks
         // and optionally train a dictionary (advanced future feature).
         // Currently, we just ensure optimal settings for code.
-        let compression_level = if is_already_compressed(content) {
+        let compression_level = if !enable_compression || is_already_compressed(content) {
             0
         } else {
             // Level 7-9 is great for small code chunks without being too slow
