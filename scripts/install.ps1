@@ -41,7 +41,7 @@ $binaries = @("mnem.exe", "mnem-daemon.exe")
 foreach ($bin in $binaries) {
     $targetFile = "$BinDir\$bin"
     $url = "$RepoUrl/$bin"
-    
+
     Write-Host "[-] Downloading $bin..." -ForegroundColor Gray
     try {
         # Check if local bin exists (if running from repo)
@@ -65,7 +65,7 @@ Write-Host "[*] Configuring system PATH..." -ForegroundColor Blue
 $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "User")
 
 if ($CurrentPath -split ';' -notcontains $BinDir -and $CurrentPath -split ';' -notcontains "$BinDir\") {
-    $NewPath = "$CurrentPath;$BinDir"
+    $NewPath = "$BinDir;$CurrentPath"
     [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
     $env:Path = "$env:Path;$BinDir"
     Write-Host "[+] PATH updated. You can now use 'mnem' from any terminal." -ForegroundColor Green
