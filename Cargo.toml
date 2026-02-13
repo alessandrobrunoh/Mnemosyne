@@ -11,7 +11,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # Internal crates
-semantic-delta-protocol = { path = "../semantic-delta-protocol" }
+semantic-delta-protocol = { git = "https://github.com/alessandrobrunoh/Semantic-Delta-Protocol.git" }
 mnem-core = { path = "crates/core/mnem-core" }
 mnem-cli = { path = "crates/apps/mnem-cli" }
 
