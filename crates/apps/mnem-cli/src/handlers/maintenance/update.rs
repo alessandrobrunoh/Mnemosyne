@@ -110,33 +110,50 @@ pub fn handle_update(check_only: bool) -> Result<()> {
     layout.success_bright("✓ Download complete!");
     layout.empty();
 
-    // Stop daemon first
-    layout.info("Stopping daemon...");
-    let _ = Command::new(&current_exe).arg("off").output();
-
     // Replace binaries with OS-appropriate names
     let target_cli = install_dir.join(cli_name);
     let target_daemon = install_dir.join(daemon_name);
 
-    // Make executable on Unix systems
+    // On Windows, download to .new names to avoid file locking
+    // User will need to restart manually
+    #[cfg(windows)]
+    {
+        let new_cli = install_dir.join(format!("{}.new", cli_name));
+        let new_daemon = install_dir.join(format!("{}.new", daemon_name));
+
+        // Copy to .new files
+        std::fs::copy(&cli_path, &new_cli)?;
+        std::fs::copy(&daemon_path, &new_daemon)?;
+
+        layout.success_bright("✓ Update downloaded!");
+        layout.empty();
+        layout.warning("Please restart mnem to complete the update:");
+        layout.info(&format!("  1. Stop daemon: mnem off"));
+        layout.info(&format!("  2. Replace {} with {}.new", cli_name, cli_name));
+        layout.info(&format!(
+            "  3. Replace {} with {}.new",
+            daemon_name, daemon_name
+        ));
+        layout.info("  4. Run 'mnem on' to start");
+    }
+
+    // On Unix, stop daemon and replace directly
     #[cfg(unix)]
     {
+        // Stop daemon
+        layout.info("Stopping daemon...");
+        let _ = Command::new(&current_exe).arg("off").output();
+
         use std::os::unix::fs::PermissionsExt;
         std::fs::rename(&cli_path, &target_cli)?;
         std::fs::rename(&daemon_path, &target_daemon)?;
         std::fs::set_permissions(&target_cli, std::fs::Permissions::from_mode(0o755))?;
         std::fs::set_permissions(&target_daemon, std::fs::Permissions::from_mode(0o755))?;
-    }
 
-    #[cfg(not(unix))]
-    {
-        std::fs::rename(&cli_path, &target_cli)?;
-        std::fs::rename(&daemon_path, &target_daemon)?;
+        layout.success_bright("✓ Update installed successfully!");
+        layout.empty();
+        layout.info("Run 'mnem on' to start the daemon");
     }
-
-    layout.success_bright("✓ Update installed successfully!");
-    layout.empty();
-    layout.info("Run 'mnem on' to start the daemon");
 
     Ok(())
 }
