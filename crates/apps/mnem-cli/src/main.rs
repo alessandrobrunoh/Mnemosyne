@@ -110,6 +110,8 @@ enum Commands {
         #[arg(long)]
         reset: bool,
     },
+    #[command(about = "Uninstall mnem")]
+    Uninstall,
 }
 
 fn main() -> Result<()> {
@@ -157,6 +159,7 @@ fn main() -> Result<()> {
         Some(Commands::Config { get, set, reset }) => {
             handlers::config::handle_config(get, set, reset)
         }
+        Some(Commands::Uninstall) => handlers::uninstall::handle_uninstall(),
         None => handlers::status::handle_status(),
     }
 }

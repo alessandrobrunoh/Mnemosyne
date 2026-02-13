@@ -9,3 +9,4 @@ pub mod restore;
 pub mod search;
 pub mod status;
 pub mod track;
+pub mod uninstall;
