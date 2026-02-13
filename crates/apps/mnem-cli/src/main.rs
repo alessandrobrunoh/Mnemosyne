@@ -105,7 +105,7 @@ enum Commands {
     Config {
         #[arg(long, short)]
         get: Option<String>,
-        #[arg(long, short)]
+        #[arg(long)]
         set: Option<String>,
         #[arg(long)]
         reset: bool,
