@@ -38,3 +38,6 @@ criterion/
 
 # Agents Temp files
 .agents/
+
+# Mnemosyne local storage (per-project)
+.mnemosyne/
