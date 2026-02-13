@@ -102,7 +102,7 @@ Mnemosyne runs as a lightweight daemon, silently recording every file change wit
 ### 1. Start the Daemon
 
 ```bash
-mnem start
+mnem on
 ```
 
 The daemon initializes and begins monitoring file changes.
@@ -111,7 +111,7 @@ The daemon initializes and begins monitoring file changes.
 
 ```bash
 cd /path/to/your/project
-mnem watch
+mnem track
 ```
 
 Every file save is now automatically captured.
@@ -119,10 +119,10 @@ Every file save is now automatically captured.
 ### 3. Explore Your History
 
 ```bash
-mnem tui
+mnem h
 ```
 
-Open the interactive terminal UI to browse and restore changes.
+View your file history in the terminal.
 
 ---
 
@@ -133,20 +133,20 @@ Open the interactive terminal UI to browse and restore changes.
 Open PowerShell and run this command to install Mnemosyne automatically:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -Command "iex (iwr 'https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1').Content"
+irm https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1 | iex
 ```
 
-*This script will download the latest binaries (if available), install them to `%USERPROFILE%\.mnemosyne\bin`, and update your PATH automatically.*
+*This script will download the latest binaries, install them to `%USERPROFILE%\.mnemosyne\bin`, and update your PATH automatically.*
 
 ### 🚀 Quick Install (macOS/Linux)
 
 Open your terminal and run this command to install Mnemosyne automatically:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.sh | bash
 ```
 
-*This script will check for prerequisites, install pre-compiled binaries (or compile from source), and update your PATH automatically.*
+*This script will check for prerequisites, download pre-compiled binaries, and update your PATH automatically.*
 
 > **Note:** After installation, restart your terminal or run `source ~/.zshrc` (or your shell equivalent).
 
@@ -235,47 +235,60 @@ launchctl start com.mnemosyne.daemon
 
 ### Command-Line Interface
 
+#### Start/Stop Daemon
+```bash
+mnem on     # Start the daemon
+mnem off    # Stop the daemon
+mnem status # Check daemon status
+```
+
+#### Track Projects
+```bash
+mnem track              # Track current directory
+mnem track --list       # List tracked projects
+```
+
 #### View File History
 ```bash
-mnem log src/main.rs
+mnem h                      # View history for current project
+mnem h --limit 50           # Limit results
+mnem log src/main.rs        # View history for specific file
 mnem log src/main.rs --limit 50
 ```
 
 #### Search Across History
 ```bash
-mnem search "function_name"
-mnem search "TODO" --pattern "*.rs" --after "2024-01-01"
+mnem s "function_name"
+mnem s "TODO" --pattern "*.rs"
 ```
 
 #### Restore from History
 ```bash
-# Interactive hunk selection
-mnem restore src/main.rs --interactive
+# Interactive restore
+mnem r src/main.rs
 
 # Restore specific save
-mnem restore src/main.rs --save-id <hash>
+mnem r src/main.rs --version <id>
 
 # Restore entire project state
-mnem restore --checkpoint <timestamp>
+mnem r --checkpoint <timestamp>
 ```
 
 #### Project Information
 ```bash
-mnem info                    # Project statistics
-mnem list                    # All tracked projects
-mnem activity                # Recent activity summary
+mnem info              # Project statistics
+mnem track --list     # All tracked projects
 ```
 
 #### Maintenance
 ```bash
-mnem gc                      # Garbage collection (remove unreferenced data)
-mnem status                  # Daemon status and health
-mnem stop                    # Stop the daemon
+mnem gc              # Garbage collection (remove unreferenced data)
+mnem status          # Daemon status and health
 ```
 
 ### Terminal UI
 
-Launch the interactive browser:
+Launch the interactive browser (if installed):
 
 ```bash
 mnem tui
