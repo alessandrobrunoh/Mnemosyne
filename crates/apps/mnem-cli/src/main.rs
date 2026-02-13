@@ -2,33 +2,15 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod config;
-mod cp;
-mod diff;
-mod gc;
-mod git;
-mod history_new;
-mod info;
-mod off;
-mod on;
-mod open;
-mod refs;
-mod restore;
-mod search;
-mod stats;
-mod status;
-mod symbols;
-mod timeline;
-mod track;
-
+mod handlers;
 mod theme;
 mod ui;
 mod ui_components;
 
 #[derive(Parser)]
 #[command(name = "mnem")]
-#[command(version = "0.2.0")]
-#[command(about = "Mnemosyne - Local history companion for developers", long_about = None)]
+#[command(version = "0.1.0")]
+#[command(about = "Mnemosyne - Local history companion", long_about = None)]
 #[command(styles = styles())]
 struct Cli {
     #[command(subcommand)]
@@ -49,16 +31,16 @@ fn styles() -> clap::builder::Styles {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Start the mnem daemon")]
+    #[command(about = "Start daemon")]
     On {
         #[arg(long)]
         auto: bool,
     },
-    #[command(about = "Stop the mnem daemon")]
+    #[command(about = "Stop daemon")]
     Off,
-    #[command(about = "Show daemon and project status")]
+    #[command(about = "Show status")]
     Status,
-    #[command(about = "Track or list tracked projects")]
+    #[command(about = "Track project")]
     Track {
         #[arg(long)]
         list: bool,
@@ -67,7 +49,7 @@ enum Commands {
         #[arg(global = true)]
         id: Option<String>,
     },
-    #[command(about = "Show file history")]
+    #[command(about = "View history")]
     H {
         file: Option<String>,
         #[arg(long, short)]
@@ -79,7 +61,7 @@ enum Commands {
         #[arg(long)]
         branch: Option<String>,
     },
-    #[command(about = "Restore file to previous version")]
+    #[command(about = "Restore file")]
     R {
         file: Option<String>,
         version: Option<usize>,
@@ -98,23 +80,7 @@ enum Commands {
         #[arg(long, short)]
         limit: Option<usize>,
     },
-    #[command(about = "Show diff between versions")]
-    D {
-        file: Option<String>,
-        #[arg(long)]
-        from: Option<usize>,
-        #[arg(long)]
-        to: Option<usize>,
-    },
-    #[command(about = "Open file in IDE")]
-    Open {
-        file: Option<String>,
-        #[arg(long, short)]
-        at: Option<usize>,
-        #[arg(long)]
-        checkpoint: Option<String>,
-    },
-    #[command(about = "Search code in history")]
+    #[command(about = "Search history")]
     S {
         query: Option<String>,
         #[arg(long, short)]
@@ -123,48 +89,6 @@ enum Commands {
         limit: Option<usize>,
         #[arg(long)]
         semantic: bool,
-    },
-    #[command(about = "Manage checkpoints")]
-    Cp {
-        message: Option<String>,
-        #[arg(long, short)]
-        list: bool,
-        id: Option<String>,
-        #[arg(long)]
-        info: bool,
-        #[arg(long)]
-        remove: bool,
-        #[arg(long)]
-        restore: bool,
-    },
-    #[command(about = "Git integration")]
-    Git {
-        #[arg(long)]
-        commits: bool,
-        #[arg(long)]
-        log: bool,
-        #[arg(long)]
-        hook: bool,
-    },
-    #[command(about = "Show symbols in file")]
-    Symbols {
-        file: Option<String>,
-        #[arg(long, short)]
-        search: Option<String>,
-        #[arg(long)]
-        modified: bool,
-    },
-    #[command(about = "Show symbol timeline")]
-    Timeline {
-        symbol: Option<String>,
-        #[arg(long, short)]
-        diff: bool,
-    },
-    #[command(about = "Find symbol references")]
-    Refs {
-        symbol: Option<String>,
-        #[arg(long)]
-        since: Option<String>,
     },
     #[command(about = "Show project info")]
     Info { project: Option<String> },
@@ -177,7 +101,7 @@ enum Commands {
         #[arg(long)]
         aggressive: bool,
     },
-    #[command(about = "Manage configuration")]
+    #[command(about = "Manage config")]
     Config {
         #[arg(long, short)]
         get: Option<String>,
@@ -192,17 +116,19 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::On { auto }) => on::handle_on(auto),
-        Some(Commands::Off) => off::handle_off(),
-        Some(Commands::Status) => status::handle_status(),
-        Some(Commands::Track { list, remove, id }) => track::handle_track(list, remove, id),
+        Some(Commands::On { auto }) => handlers::on::handle_on(auto),
+        Some(Commands::Off) => handlers::off::handle_off(),
+        Some(Commands::Status) => handlers::status::handle_status(),
+        Some(Commands::Track { list, remove, id }) => {
+            handlers::track::handle_track(list, remove, id)
+        }
         Some(Commands::H {
             file,
             limit,
             timeline,
             since,
             branch,
-        }) => history_new::handle_h(file, limit, timeline, since, branch),
+        }) => handlers::history_new::handle_h(file, limit, timeline, since, branch),
         Some(Commands::R {
             file,
             version,
@@ -213,44 +139,24 @@ fn main() -> Result<()> {
             checkpoint,
             branch,
             limit,
-        }) => restore::handle_r(
+        }) => handlers::restore::handle_r(
             file, version, list, undo, to, symbol, checkpoint, branch, limit,
         ),
-        Some(Commands::D { file, from, to }) => diff::handle_d(file, from, to),
-        Some(Commands::Open {
-            file,
-            at,
-            checkpoint,
-        }) => open::handle_open(file, at, checkpoint),
         Some(Commands::S {
             query,
             file,
             limit,
             semantic,
-        }) => search::handle_s(query, file, limit, semantic),
-        Some(Commands::Cp {
-            message,
-            list,
-            id,
-            info,
-            remove,
-            restore,
-        }) => cp::handle_cp(message, list, id, info, remove, restore),
-        Some(Commands::Git { commits, log, hook }) => git::handle_git(commits, log, hook),
-        Some(Commands::Symbols {
-            file,
-            search,
-            modified,
-        }) => symbols::handle_symbols(file, search, modified),
-        Some(Commands::Timeline { symbol, diff }) => timeline::handle_timeline(symbol, diff),
-        Some(Commands::Refs { symbol, since }) => refs::handle_refs(symbol, since),
-        Some(Commands::Info { project }) => info::handle_info(project),
+        }) => handlers::search::handle_s(query, file, limit, semantic),
+        Some(Commands::Info { project }) => handlers::info::handle_info(project),
         Some(Commands::Gc {
             keep,
             dry_run,
             aggressive,
-        }) => gc::handle_gc(keep, dry_run, aggressive),
-        Some(Commands::Config { get, set, reset }) => config::handle_config(get, set, reset),
-        None => status::handle_status(),
+        }) => handlers::gc::handle_gc(keep, dry_run, aggressive),
+        Some(Commands::Config { get, set, reset }) => {
+            handlers::config::handle_config(get, set, reset)
+        }
+        None => handlers::status::handle_status(),
     }
 }
