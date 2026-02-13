@@ -24,6 +24,7 @@ content_inspector.workspace = true
 dashmap.workspace = true
 parking_lot.workspace = true
 log.workspace = true
+lru = "0.12"
 
 flexi_logger.workspace = true
 env_logger.workspace = true

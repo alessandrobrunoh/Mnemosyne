@@ -1,12 +1,15 @@
 use ignore::gitignore::GitignoreBuilder;
+use lru::LruCache;
 use mnem_core::{AppError, AppResult, Repository};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+
+const DEBOUNCER_CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(5000).unwrap();
 
 pub struct Monitor {
     root_path: PathBuf,
@@ -55,7 +58,7 @@ impl Monitor {
         });
 
         // Event Loop
-        let mut debouncers: HashMap<PathBuf, Instant> = HashMap::new();
+        let mut debouncers: LruCache<PathBuf, Instant> = LruCache::new(DEBOUNCER_CACHE_SIZE);
         let mut interval = tokio::time::interval(Duration::from_millis(500));
 
         let mnemignore = self.get_mnemignore()?;
@@ -71,27 +74,27 @@ impl Monitor {
                 Some(event) = rx.recv() => {
                     log::info!("File event received: {:?}", event.path);
                     if !self.is_ignored(&event.path, Some(&mnemignore)) {
-
-                        // Cap memory usage under heavy load (audit 4.5)
-                        if debouncers.len() > 10000 {
-                            debouncers.clear(); // Safety valve: drop pending debounce to avoid OOM
-                            eprintln!("Warning: Too many pending file events, flush triggered");
-                        }
-                        debouncers.insert(event.path, Instant::now() + Duration::from_secs(1));
+                        // LRU cache automatically evicts oldest entry when full
+                        debouncers.push(event.path, Instant::now() + Duration::from_secs(1));
                     }
                 }
                 _ = interval.tick() => {
                     let now = Instant::now();
                     let mut to_save = Vec::new();
 
-                    debouncers.retain(|path, deadline| {
-                        if now >= *deadline {
-                            to_save.push(path.clone());
-                            false
-                        } else {
-                            true
+                    // Collect expired entries and remove them from cache
+                    let keys_to_remove: Vec<PathBuf> = debouncers
+                        .iter()
+                        .filter(|(_, deadline)| now >= **deadline)
+                        .map(|(path, _)| path.clone())
+                        .collect();
+
+                    // Remove expired entries and collect paths to save
+                    for path in keys_to_remove {
+                        if debouncers.pop(&path).is_some() {
+                            to_save.push(path);
                         }
-                    });
+                    }
 
                     if !to_save.is_empty() {
                         // Parallel processing of changed files
@@ -148,6 +151,8 @@ impl Monitor {
                     let duration = start.elapsed().as_micros() as u64;
                     if let Some(ref state) = self.state {
                         state.record_save(duration);
+                        // Invalidate history cache for this file
+                        state.invalidate_history_cache(Some(&path.to_string_lossy()));
                     }
                     log::info!("Saved file {:?} with hash {}", path, &hash[..8]);
                 }

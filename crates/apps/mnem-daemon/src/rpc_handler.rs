@@ -344,8 +344,41 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
                 if file_path.starts_with(project_path) {
+                    // Try cache first
+                    if let Some(cached) = state.get_cached_history(&params.file_path) {
+                        let infos: Vec<protocol::SnapshotInfo> = cached
+                            .into_iter()
+                            .filter(|sn| {
+                                if let Some(ref b) = params.branch {
+                                    sn.git_branch.as_ref() == Some(b)
+                                } else {
+                                    true
+                                }
+                            })
+                            .map(|sn| {
+                                let commit_message = sn.commit_hash.as_ref().and_then(|h| {
+                                    repo.db.get_git_commit(h).ok().flatten().map(|(msg, _, _)| msg)
+                                });
+                                protocol::SnapshotInfo {
+                                    id: sn.id,
+                                    file_path: sn.file_path,
+                                    timestamp: sn.timestamp,
+                                    content_hash: sn.content_hash,
+                                    git_branch: sn.git_branch,
+                                    commit_hash: sn.commit_hash,
+                                    commit_message,
+                                }
+                            })
+                            .collect();
+                        return JsonRpcResponse::success(req.id, serde_json::to_value(infos).unwrap_or(json!([])));
+                    }
+
+                    // Cache miss - fetch from database
                     match repo.get_history(&params.file_path) {
                         Ok(history) => {
+                            // Cache the result
+                            state.cache_history(params.file_path.clone(), history.clone());
+                            
                             let infos: Vec<protocol::SnapshotInfo> = history
                                 .into_iter()
                                 .filter(|sn| {
