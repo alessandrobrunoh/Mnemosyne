@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Manages the list of known projects in `~/.mnemosyne/registry.json`.
+const TRACKED_FILENAME: &str = "tracked";
+
 pub struct ProjectRegistry {
     registry_path: PathBuf,
-    projects: HashMap<String, Project>, // Key is project.id
+    projects: HashMap<String, Project>,
 }
 
 impl ProjectRegistry {
@@ -20,7 +21,6 @@ impl ProjectRegistry {
             HashMap::new()
         };
 
-        // Auto-purge blacklisted or invalid paths (e.g. root)
         let blacklist = [
             "/", "/Users", "/Users/", "/var", "/tmp", "/etc", "/bin", "/sbin", "/usr",
         ];
@@ -38,7 +38,6 @@ impl ProjectRegistry {
         let path_str = path.to_string_lossy();
         let path_buf = path.to_path_buf();
 
-        // 1. Rigorous blacklist (audit 1.2)
         let blacklist = [
             "/", "/Users", "/Users/", "/var", "/tmp", "/etc", "/bin", "/sbin", "/usr",
         ];
@@ -49,24 +48,89 @@ impl ProjectRegistry {
             )));
         }
 
-        let new_project = Project::new(path);
-        if new_project.name.is_empty() || new_project.name == "unknown" {
-            return Err(AppError::Internal(
-                "Cannot determine a valid project name for this path".into(),
-            ));
-        }
+        let mnem_folder = path.join(".mnemosyne");
+        fs::create_dir_all(&mnem_folder).map_err(AppError::IoGeneric)?;
 
-        if let Some(existing) = self.projects.get_mut(&new_project.id) {
-            existing.last_open = chrono::Local::now().to_rfc3339();
+        let tracked_file = mnem_folder.join(TRACKED_FILENAME);
+
+        let project_id = if tracked_file.exists() {
+            Self::read_project_id_from_file(&tracked_file)?
         } else {
-            self.projects
-                .insert(new_project.id.clone(), new_project.clone());
-        }
+            Project::generate_id(path)
+        };
 
-        self.save()?;
-        self.projects.get(&new_project.id).cloned().ok_or_else(|| {
-            AppError::Internal("Failed to retrieve newly created project".to_string())
-        })
+        let existing_by_path = self.projects.values().find(|p| p.path == path_str.as_ref());
+
+        let project = if let Some(existing) = existing_by_path {
+            if existing.id != project_id {
+                let mut updated = existing.clone();
+                updated.id = project_id.clone();
+                updated.last_open = chrono::Local::now().to_rfc3339();
+                let existing_id = existing.id.clone();
+                self.projects.remove(&existing_id);
+                self.projects.insert(project_id.clone(), updated.clone());
+                self.update_tracked_file(&tracked_file, &updated)?;
+                self.save()?;
+                updated
+            } else {
+                let mut p = existing.clone();
+                p.last_open = chrono::Local::now().to_rfc3339();
+                self.projects.insert(project_id.clone(), p.clone());
+                self.update_tracked_file(&tracked_file, &p)?;
+                self.save()?;
+                p
+            }
+        } else {
+            let new_project = Project::from_id(&project_id, path);
+            if new_project.name.is_empty() || new_project.name == "unknown" {
+                return Err(AppError::Internal(
+                    "Cannot determine a valid project name for this path".into(),
+                ));
+            }
+            self.update_tracked_file(&tracked_file, &new_project)?;
+            self.projects
+                .insert(project_id.clone(), new_project.clone());
+            self.save()?;
+            new_project
+        };
+
+        self.projects
+            .get(&project.id)
+            .cloned()
+            .ok_or_else(|| AppError::Internal("Failed to retrieve project".to_string()))
+    }
+
+    fn read_project_id_from_file(file: &Path) -> AppResult<String> {
+        let content = fs::read_to_string(file).map_err(AppError::IoGeneric)?;
+        for line in content.lines() {
+            if line.starts_with("project_id:") {
+                return Ok(line.split(':').nth(1).unwrap_or("").trim().to_string());
+            }
+        }
+        Err(AppError::Internal(
+            "No project_id found in tracked file".to_string(),
+        ))
+    }
+
+    fn update_tracked_file(&self, file: &Path, project: &Project) -> AppResult<()> {
+        let content = format!(
+            "tracked by mnemosyne\nproject_id: {}\nproject_name: {}\npath: {}\nlast_open: {}\n",
+            project.id, project.name, project.path, project.last_open
+        );
+        fs::write(file, content).map_err(AppError::IoGeneric)?;
+        Ok(())
+    }
+
+    pub fn find_by_id(&self, id: &str) -> Option<Project> {
+        self.projects.get(id).cloned()
+    }
+
+    pub fn find_by_path(&self, path: &Path) -> Option<Project> {
+        let path_str = path.to_string_lossy();
+        self.projects
+            .values()
+            .find(|p| p.path == path_str.as_ref())
+            .cloned()
     }
 
     fn save(&self) -> AppResult<()> {
@@ -85,6 +149,18 @@ impl ProjectRegistry {
 
     pub fn list_projects(&self) -> Vec<Project> {
         let mut list: Vec<Project> = self.projects.values().cloned().collect();
+
+        // Filter out projects that no longer exist or don't have .mnemosyne folder
+        list.retain(|p| {
+            let project_path = Path::new(&p.path);
+            if !project_path.exists() {
+                return false;
+            }
+            // Check for .mnemosyne folder marker in project directory
+            let mnem_folder = project_path.join(".mnemosyne");
+            mnem_folder.exists() && mnem_folder.is_dir()
+        });
+
         // Sort by last_open desc
         list.sort_by(|a, b| b.last_open.cmp(&a.last_open));
         list
@@ -96,5 +172,11 @@ impl ProjectRegistry {
             self.save()?;
         }
         Ok(removed)
+    }
+
+    pub fn update(&mut self, project: Project) -> AppResult<()> {
+        self.projects.insert(project.id.clone(), project);
+        self.save()?;
+        Ok(())
     }
 }

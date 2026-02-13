@@ -446,7 +446,7 @@ pub struct SemanticHistoryParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SemanticHistoryResponse {
-    pub deltas: Vec<crate::models::SemanticDelta>,
+    pub deltas: Vec<crate::models::SemanticRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -570,6 +570,14 @@ pub struct StatusResponse {
     #[serde(default)]
     pub total_size_bytes: u64,
     pub avg_response_time_ms: f64,
+    #[serde(default)]
+    pub avg_save_time_ms: f64,
+    #[serde(default)]
+    pub total_saves: u64,
+    #[serde(default)]
+    pub total_snapshots: u64,
+    #[serde(default)]
+    pub total_symbols: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

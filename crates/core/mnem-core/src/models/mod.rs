@@ -1,5 +1,5 @@
 pub use semantic_delta_protocol::models::{
-    Chunk, DeltaKind, SemanticDelta, SemanticSymbol, SymbolReference,
+    Chunk, RecordKind, SemanticRecord, SemanticSymbol, SymbolReference,
 };
 use std::collections::BTreeMap;
 
@@ -108,6 +108,6 @@ impl FileNode {
     }
 }
 
-mod project;
+pub mod project;
 
 pub use project::Project;

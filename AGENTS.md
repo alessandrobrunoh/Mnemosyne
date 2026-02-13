@@ -18,7 +18,7 @@ The goal is to build a TUI (Text-based User Interface), CLI (Command Line Interf
 - **Strict Pathing**: Always use absolute paths for file system operations.
 - **Error Handling**: No `unwrap()` or `expect()` in the daemon. Use `Result` and propagate errors using `AppError`.
 - **Database**: SQLite is used as a relational index for metadata, while the filesystem is the source of truth for blobs (Content-Addressable Storage).
-- **Tooling**: Ensure any new CLI command follows the `ButlerLayout` UI patterns for consistency.
+- **Tooling**: Ensure any new CLI command follows the `Layout` UI patterns for consistency.
 
 ## Vision for Future Contributors
 

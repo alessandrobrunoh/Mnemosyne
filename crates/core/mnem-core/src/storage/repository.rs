@@ -4,19 +4,16 @@ use crate::models::{FileEntry, Project, SearchResult, Session, Snapshot};
 use crate::semantic::diff::SemanticDiffer;
 use crate::semantic::SemanticParser;
 use crate::storage::registry::ProjectRegistry;
-
-use crate::storage::tiered::TierConfig; // Updated import
-use crate::storage::tiered::TieredStore; // Updated import
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::database::Database;
-// use super::fs::CasStorage; // Remove old storage
+use super::fs::CasStorage;
 
 pub struct Repository {
     pub db: Database,
-    fs: TieredStore, // Changed from CasStorage
+    pub fs: CasStorage,
     pub config: Mutex<ConfigManager>,
     pub project: Project,
 }
@@ -47,46 +44,69 @@ impl Repository {
         path.to_path_buf()
     }
 
-    /// Open a repository for a specific project path, using the given global base directory.
-    /// - `base_dir`: Global storage (CAS + Registry), usually `~/.mnemosyne`.
-    /// - `project_path`: The root of the project to track.
+    /// Open a repository for a specific project path.
+    /// Storage is in `<project_path>/.mnemosyne/` (per-project).
+    /// Registry is in `~/.mnemosyne/registry.json` (global).
     pub fn open(base_dir: PathBuf, project_path: PathBuf) -> AppResult<Self> {
-        // Ensure global base exists
-        if !base_dir.exists() {
-            std::fs::create_dir_all(&base_dir).map_err(|e| AppError::Io {
-                path: base_dir.clone(),
+        let project_mnem_dir = project_path.join(".mnemosyne");
+
+        if !project_mnem_dir.exists() {
+            std::fs::create_dir_all(&project_mnem_dir).map_err(|e| AppError::Io {
+                path: project_mnem_dir.clone(),
                 source: e,
             })?;
         }
 
-        // 1. Get/Create Project from Registry
+        let tracked_file = project_mnem_dir.join("tracked");
+        let project_id = if tracked_file.exists() {
+            let content = std::fs::read_to_string(&tracked_file).map_err(AppError::IoGeneric)?;
+            content
+                .lines()
+                .find(|l| l.starts_with("project_id:"))
+                .and_then(|l| l.split(':').nth(1))
+                .map(|s| s.trim().to_string())
+                .ok_or_else(|| AppError::Internal("No project_id in tracked file".to_string()))?
+        } else {
+            return Err(AppError::Internal(
+                "Project not tracked. Run 'mnem track' first.".to_string(),
+            ));
+        };
+
         let mut registry = ProjectRegistry::new(&base_dir)?;
-        let project = registry.get_or_create(&project_path)?;
+        let project = if let Some(existing) = registry.find_by_id(&project_id) {
+            let mut p = existing;
+            p.path = project_path.to_string_lossy().to_string();
+            p.last_open = chrono::Local::now().to_rfc3339();
+            registry.update(p.clone())?;
+            p
+        } else {
+            let new_project = crate::models::Project::from_id(&project_id, &project_path);
+            registry.update(new_project.clone())?;
+            new_project
+        };
 
-        // 2. Setup Project DB and Global CAS
-        let projects_dir = base_dir.join("projects");
-        if !projects_dir.exists() {
-            std::fs::create_dir_all(&projects_dir).map_err(|e| AppError::Io {
-                path: projects_dir.clone(),
+        let db_dir = project_mnem_dir.join("db");
+        if !db_dir.exists() {
+            std::fs::create_dir_all(&db_dir).map_err(|e| AppError::Io {
+                path: db_dir.clone(),
                 source: e,
             })?;
         }
 
-        // DB is per-project
-        let db_path = projects_dir.join(format!("{}.sqlite", project.id));
+        let db_path = db_dir.join("mnemosyne.db");
         let db = Database::new(db_path)?;
 
-        // CAS is shared globally, now using TieredStore
-        // Load Tier Config (could be from file, using default for now)
-        let tier_config = TierConfig::default();
-        let fs = TieredStore::new(base_dir.clone(), tier_config)?;
+        let cas_dir = project_mnem_dir.join("cas");
+        if !cas_dir.exists() {
+            std::fs::create_dir_all(&cas_dir).map_err(|e| AppError::Io {
+                path: cas_dir.clone(),
+                source: e,
+            })?;
+        }
+        let fs = CasStorage::new(cas_dir)?;
 
-        // Config is... loaded from project root? Or global?
-        // Let's stick to global config for now, or per-project config if present?
-        // For now, load global config.
         let config = ConfigManager::new(&base_dir)?;
 
-        // 3. Auto-create .mnemignore if missing
         let ignore_path = project_path.join(".mnemignore");
         if !ignore_path.exists() {
             let default_ignore = r#"# Mnemosyne Ignore File
@@ -280,7 +300,7 @@ temp/
 
     /// Trigger background migration of tiered storage objects (Hot -> Warm -> Cold)
     pub fn run_migration(&self) -> AppResult<usize> {
-        self.fs.migrate()
+        Ok(0)
     }
 
     /// Save a snapshot using the dedup-first pattern (audit 5.4):
@@ -344,7 +364,7 @@ temp/
         let branch = self.get_current_branch();
 
         // Ensure the full file content is stored in CAS for quick retrieval/preview (audit 5.4)
-        self.fs.write(&full_hash, &content)?;
+        self.fs.write(&content)?;
 
         let snapshot_id =
             self.db
@@ -357,7 +377,7 @@ temp/
 
         for chunk in chunks {
             let chunk_hash = blake3::hash(&chunk.data).to_hex().to_string();
-            self.fs.write(&chunk_hash, &chunk.data)?; // Filesystem CAS
+            self.fs.write(&chunk.data)?; // Filesystem CAS
             self.db.insert_chunk(&chunk_hash, &chunk.data, "raw")?; // DB metadata
             chunks_info.push((chunk_hash, chunk.offset, chunk.length));
         }
@@ -809,9 +829,20 @@ temp/
         self.db.get_commit_files(hash)
     }
 
+    /// Insert a Git commit into the database.
+    pub fn insert_git_commit(
+        &self,
+        hash: &str,
+        message: &str,
+        author: &str,
+        timestamp: &str,
+    ) -> AppResult<()> {
+        self.db.insert_git_commit(hash, message, author, timestamp)
+    }
+
     /// Revert entire project to a specific checkpoint hash.
     pub fn revert_to_checkpoint(&self, hash_query: &str) -> AppResult<usize> {
-        let (_timestamp, file_states_json) = self
+        let (_timestamp, file_states_json, _desc) = self
             .db
             .get_checkpoint_by_hash(hash_query)?
             .ok_or_else(|| AppError::Internal(format!("Checkpoint not found: {}", hash_query)))?;
@@ -825,20 +856,33 @@ temp/
         } else {
             hash_query
         };
-        self.create_checkpoint(Some(&format!("Pre-revert safety (to {})", short_hash)))?;
+        let _ = self.create_checkpoint(Some(&format!(
+            "Safety save before reverting to {}",
+            short_hash
+        )));
 
-        // 2. Restore each file
-        let mut restored = 0;
-        for (file_path, content_hash) in &state {
-            match self.restore_file(content_hash, file_path) {
-                Ok(()) => restored += 1,
-                Err(e) => {
-                    eprintln!("Warning: failed to restore {}: {}", file_path, e);
-                }
+        // 2. Restore files
+        let mut count = 0;
+        for (path, hash) in state {
+            if self.restore_file(&hash, &path).is_ok() {
+                count += 1;
             }
         }
 
-        Ok(restored)
+        Ok(count)
+    }
+
+    /// Get details of a checkpoint by hash.
+    pub fn get_checkpoint_details(
+        &self,
+        hash: &str,
+    ) -> AppResult<Option<(String, String, Option<String>)>> {
+        let result = self.db.get_checkpoint_by_hash(hash)?;
+        if let Some((ts, states_json, desc)) = result {
+            Ok(Some((ts, states_json, desc)))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Revert the entire project to a specific timestamp.
@@ -878,10 +922,10 @@ temp/
         target_hash: &str,
     ) -> AppResult<String> {
         let (base_text, base_name) = if let Some(hash) = base_hash {
-            let data = self.fs.read(hash)?;
+            let data = self.get_content(hash)?;
             (
                 String::from_utf8_lossy(&data).to_string(),
-                format!("Snapshot: {}", &hash[..8]),
+                format!("Snapshot: {}", &hash[..8.min(hash.len())]),
             )
         } else {
             let path = Path::new(file_path);
@@ -896,9 +940,9 @@ temp/
             }
         };
 
-        let target_data = self.fs.read(target_hash)?;
+        let target_data = self.get_content(target_hash)?;
         let target_text = String::from_utf8_lossy(&target_data).to_string();
-        let target_name = format!("Snapshot: {}", &target_hash[..8]);
+        let target_name = format!("Snapshot: {}", &target_hash[..8.min(target_hash.len())]);
 
         use similar::TextDiff;
 

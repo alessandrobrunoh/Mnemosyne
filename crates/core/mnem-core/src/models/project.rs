@@ -11,8 +11,7 @@ pub struct Project {
 impl Project {
     pub fn new(path: &std::path::Path) -> Self {
         let path_str = path.to_string_lossy().to_string();
-        // Generate a stable ID based on the absolute path
-        let id = blake3::hash(path_str.as_bytes()).to_hex().to_string()[..16].to_string();
+        let id = Self::generate_id(path);
         let name = path
             .file_name()
             .unwrap_or_default()
@@ -22,6 +21,25 @@ impl Project {
         Self {
             id,
             path: path_str,
+            name,
+            last_open: chrono::Local::now().to_rfc3339(),
+        }
+    }
+
+    pub fn generate_id(path: &std::path::Path) -> String {
+        let path_str = path.to_string_lossy().to_string();
+        blake3::hash(path_str.as_bytes()).to_hex().to_string()[..16].to_string()
+    }
+
+    pub fn from_id(id: &str, path: &std::path::Path) -> Self {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        Self {
+            id: id.to_string(),
+            path: path.to_string_lossy().to_string(),
             name,
             last_open: chrono::Local::now().to_rfc3339(),
         }

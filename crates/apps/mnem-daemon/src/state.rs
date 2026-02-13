@@ -30,6 +30,8 @@ pub struct DaemonState {
     /// Metrics (Atomics for zero-lock updates)
     pub total_requests: AtomicU64,
     pub total_processing_time_us: AtomicU64,
+    pub total_saves: AtomicU64,
+    pub total_save_time_us: AtomicU64,
     pub cached_history_size: AtomicU64,
     pub cached_total_size: AtomicU64,
 
@@ -52,6 +54,8 @@ impl DaemonState {
             repos: DashMap::new(),
             total_requests: AtomicU64::new(0),
             total_processing_time_us: AtomicU64::new(0),
+            total_saves: AtomicU64::new(0),
+            total_save_time_us: AtomicU64::new(0),
             cached_history_size: AtomicU64::new(0),
             cached_total_size: AtomicU64::new(0),
             init_state: RwLock::new(InitializationState::Uninitialized),
@@ -73,5 +77,26 @@ impl DaemonState {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
         self.total_processing_time_us
             .fetch_add(duration_us, Ordering::Relaxed);
+    }
+
+    /// Record a snapshot save execution time
+    pub fn record_save(&self, duration_us: u64) {
+        self.total_saves.fetch_add(1, Ordering::Relaxed);
+        self.total_save_time_us
+            .fetch_add(duration_us, Ordering::Relaxed);
+    }
+
+    /// Calculate total storage size from all watched projects
+    pub fn calculate_total_size(&self) -> u64 {
+        let mut total: u64 = 0;
+
+        for repo in self.repos.iter() {
+            if let Ok(size) = repo.get_project_size() {
+                total += size;
+            }
+        }
+
+        self.cached_total_size.store(total, Ordering::Relaxed);
+        total
     }
 }

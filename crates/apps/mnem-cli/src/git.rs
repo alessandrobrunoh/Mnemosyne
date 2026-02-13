@@ -1,36 +1,42 @@
 use anyhow::Result;
-use std::fs;
-use std::path::Path;
 
-pub fn install_hook(project_root: &Path) -> Result<()> {
-    let hooks_dir = project_root.join(".git").join("hooks");
-    if !hooks_dir.exists() {
-        return Err(anyhow::anyhow!(
-            "Not a git repository (no .git/hooks found)"
-        ));
+pub fn handle_git(commits: bool, log: bool, _hook: bool) -> Result<()> {
+    use mnem_core::env::get_base_dir;
+    use mnem_core::storage::Repository;
+
+    let base_dir = get_base_dir()?;
+    let cwd = std::env::current_dir()?;
+    let repo = Repository::open(base_dir, cwd)?;
+
+    if commits {
+        let git_commits = repo.list_commits()?;
+        println!("Git Commits:");
+        println!("─");
+
+        for (hash, msg, author, ts, files) in git_commits {
+            println!("{}  {}  {}", &hash[..8], ts, msg);
+            println!("  Author: {}", author);
+            println!("  Files: {}", files);
+            println!();
+        }
+        return Ok(());
     }
 
-    let hook_path = hooks_dir.join("post-commit");
+    if log {
+        let git_commits = repo.list_commits()?;
+        println!("Git Log:");
+        println!("─");
 
-    let hook_content = r#"#!/bin/sh
-# Mnemosyne post-commit hook
-# Links the latest snapshots to the official Git commit
+        for (hash, msg, _author, ts, _files) in git_commits {
+            println!("{}  {}  {}", &hash[..8], ts, msg);
+        }
+        return Ok(());
+    }
 
-if command -v mnem >/dev/null 2>&1; then
-    COMMIT_HASH=$(git rev-parse HEAD)
-    AUTHOR=$(git log -1 --pretty=%an)
-    MESSAGE=$(git log -1 --pretty=%s)
-    TIMESTAMP=$(git log -1 --pretty=%cI)
-    
-    mnem git-event "$COMMIT_HASH" "$MESSAGE" "$AUTHOR" "$TIMESTAMP"
-else
-    echo "Warning: Mnemosyne (mnem) not found in PATH. Skipping integration."
-fi
-"#;
-
-    fs::write(&hook_path, hook_content)?;
-
-    crate::os::set_executable(&hook_path)?;
+    println!("Usage:");
+    println!("  mnem git --commits   # list commits");
+    println!("  mnem git --log      # git log");
+    println!("  mnem git --hook     # install hook");
 
     Ok(())
 }

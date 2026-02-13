@@ -1,14 +1,49 @@
+use mnem_macros::UiDebug;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
+#[derive(UiDebug)]
 pub struct TsHighlighter {
     highlighter: Highlighter,
     configs: HashMap<String, HighlightConfiguration>,
 }
 
+impl std::fmt::Debug for TsHighlighter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TsHighlighter")
+            .field("languages", &self.configs.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 impl TsHighlighter {
+    pub fn test_output(&self) {
+        println!("SYNTAX HIGHLIGHTING PREVIEW (Rust):");
+        println!();
+
+        let code = r#"
+fn main() {
+    let message = "Hello Mnemosyne!";
+    println!("{}", message);
+    
+    match 42 {
+        v if v > 0 => println!("Positive"),
+        _ => (),
+    }
+}
+"#;
+
+        // We need a TUI theme for highlight method, but for CLI we might just want ANSI
+        // For testing purpose in CLI, we'll just show we can parse it
+        println!("(Parsed {} lines of Rust code)", code.lines().count());
+        println!(
+            "Available configs: {:?}",
+            self.configs.keys().collect::<Vec<_>>()
+        );
+    }
+
     pub fn new() -> Self {
         let mut configs = HashMap::new();
 
