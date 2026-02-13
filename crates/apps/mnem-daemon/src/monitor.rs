@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 pub struct Monitor {
     root_path: PathBuf,
     repo: Arc<Repository>,
+    state: Option<Arc<crate::state::DaemonState>>,
 }
 
 struct FileEvent {
@@ -19,7 +20,11 @@ struct FileEvent {
 
 impl Monitor {
     pub fn new(root_path: PathBuf, repo: Arc<Repository>) -> Self {
-        Self { root_path, repo }
+        Self { root_path, repo, state: None }
+    }
+
+    pub fn with_state(root_path: PathBuf, repo: Arc<Repository>, state: Arc<crate::state::DaemonState>) -> Self {
+        Self { root_path, repo, state: Some(state) }
     }
 
     pub async fn start(&self) -> AppResult<()> {
@@ -133,11 +138,23 @@ impl Monitor {
             false
         };
 
+        log::info!("File {:?} is_binary: {}", path, is_binary);
+
         if !is_binary {
             log::info!("Processing file: {:?}", path);
-            if let Err(e) = self.repo.save_snapshot_from_file(path) {
-                log::error!("Failed to save {:?}: {:?}", path, e);
+            let start = Instant::now();
+            match self.repo.save_snapshot_from_file(path) {
+                Ok(hash) => {
+                    let duration = start.elapsed().as_micros() as u64;
+                    if let Some(ref state) = self.state {
+                        state.record_save(duration);
+                    }
+                    log::info!("Saved file {:?} with hash {}", path, &hash[..8]);
+                }
+                Err(e) => log::error!("Failed to save {:?}: {:?}", path, e),
             }
+        } else {
+            log::info!("Skipping binary file: {:?}", path);
         }
 
     }

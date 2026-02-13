@@ -2,54 +2,43 @@
 members = [
     "crates/core/mnem-core",
     "crates/core/mnem-test",
+    "crates/core/mnem-macros",
     "crates/apps/mnem-daemon",
     "crates/apps/mnem-tui",
     "crates/apps/mnem-cli",
-    "crates/extensions/mnem-mcp",
-    "crates/extensions/mnem-lsp",
-    "crates/extensions/mnem-zed",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-# Keep the git
-semantic-delta-protocol = { git = "https://github.com/alessandrobrunoh/semantic-delta-protocol", branch = "main" }
+# Internal crates
+semantic-delta-protocol = { path = "../semantic-delta-protocol" }
 mnem-core = { path = "crates/core/mnem-core" }
-mnem-daemon = { path = "crates/apps/mnem-daemon" }
-mnem-tui = { path = "crates/apps/mnem-tui" }
 mnem-cli = { path = "crates/apps/mnem-cli" }
 
 # Shared external dependencies
-anyhow = "1.0.82"
-thiserror = "2.0.18"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-tokio = { version = "1.37.0", features = ["full"] }
-chrono = "0.4.38"
-log = "0.4.21"
-env_logger = "0.11.3"
-flexi_logger = "0.29"
-rayon = "1.11.0"
-similar = { version = "2.5.0", features = ["inline"] }
-syntect = "5.3.0"
-tempfile = "3.25.0"
-blake3 = "1.5.1"
-zstd = "0.13.3"
-rusqlite = { version = "0.31.0", features = ["bundled"] }
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+chrono = "0.4"
+log = "0.4"
+env_logger = "0.11"
+rayon = "1.10"
+blake3 = "1.5"
+zstd = "0.13"
+rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
-ignore = "0.4.22"
-dirs = "5.0.1"
-toml = "0.9.11"
-notify = "6.1.1"
-ratatui = "0.26.1"
-crossterm = { version = "0.27.0", features = ["events"] }
-content_inspector = "0.2.4"
-futures-util = "0.3.30"
-fastcdc = "3.1.0"
-streaming-iterator = "0.1.9"
+ignore = "0.4"
+dirs = "5.0"
+toml = "0.8"
+notify = "6.1"
+tempfile = "3.10"
+fastcdc = "3.1"
+streaming-iterator = "0.1"
 tree-sitter = "0.24"
-tree-sitter-rust = "0.21.2"
+tree-sitter-rust = "0.21"
 tree-sitter-python = "0.23"
 tree-sitter-javascript = "0.23"
 tree-sitter-typescript = "0.23"
@@ -58,25 +47,27 @@ tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-java = "0.23"
 tree-sitter-ruby = "0.23"
-tree-sitter-c-sharp = "0.23"
-tree-sitter-php = "0.23"
 tree-sitter-json = "0.24"
 tree-sitter-html = "0.23"
 tree-sitter-css = "0.23"
 tree-sitter-md = "0.3"
-windows-sys = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_System_Threading",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Pipes",
-    "Win32_Security",
-] }
+bytes = "1.6"
+flexi_logger = "0.29"
 tree-sitter-highlight = "0.24"
-lru = "0.13.0"
-serde_yaml = "0.9.34"
+lru = "0.13"
+serde_yaml = "0.9"
+memmap2 = "0.9"
+lasso = { version = "0.7", features = ["multi-threaded"] }
 uuid = { version = "1.8", features = ["v4"] }
 dashmap = "6.0"
 parking_lot = "0.12"
-bytes = "1.6"
-memmap2 = "0.9"
-lasso = { version = "0.7", features = ["multi-threaded"] }
+content_inspector = "0.2"
+similar = "2.5"
+syntect = "5.3"
+ratatui = "0.26"
+crossterm = "0.27"
+windows-sys = "0.52"
+mnem-tui = { path = "crates/apps/mnem-tui" }
+mnem-daemon = { path = "crates/apps/mnem-daemon" }
+mnem-macros = { path = "crates/core/mnem-macros" }
+mnem-test = { path = "crates/core/mnem-test" }

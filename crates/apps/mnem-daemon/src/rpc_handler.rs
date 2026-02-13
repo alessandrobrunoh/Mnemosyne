@@ -147,14 +147,36 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 0.0
             };
 
+            let total_saves = state.total_saves.load(Ordering::Relaxed);
+            let total_save_time = state.total_save_time_us.load(Ordering::Relaxed);
+            let avg_save_time = if total_saves > 0 {
+                (total_save_time as f64 / total_saves as f64) / 1000.0
+            } else {
+                0.0
+            };
+
+            let mut total_snapshots = 0;
+            let mut total_symbols = 0;
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                total_snapshots += repo.db.get_snapshot_count().unwrap_or(0);
+                total_symbols += repo.db.get_symbol_count().unwrap_or(0);
+            }
+
+            let total_size = state.calculate_total_size();
+
             let status = protocol::StatusResponse {
                 version: env!("CARGO_PKG_VERSION").into(),
                 uptime_secs: state.start_time.elapsed().as_secs(),
                 watched_projects: state.monitors.iter().map(|m| m.key().clone()).collect(),
                 active_sessions: 0,
-                history_size_bytes: state.cached_history_size.load(Ordering::Relaxed),
-                total_size_bytes: state.cached_total_size.load(Ordering::Relaxed),
+                history_size_bytes: total_size,
+                total_size_bytes: total_size,
                 avg_response_time_ms: avg_time,
+                avg_save_time_ms: avg_save_time,
+                total_saves,
+                total_snapshots: total_snapshots as u64,
+                total_symbols: total_symbols as u64,
             };
             JsonRpcResponse::success(req.id, serde_json::to_value(status).unwrap_or(json!({})))
         }
@@ -184,7 +206,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             match Repository::open(base_dir, project_path.clone()) {
                 Ok(repo) => {
                     let repo = Arc::new(repo);
-                    let monitor = Arc::new(Monitor::new(project_path, repo.clone()));
+                    let monitor = Arc::new(Monitor::with_state(project_path, repo.clone(), state.clone()));
 
                     let monitor_scan = monitor.clone();
                     tokio::task::spawn_blocking(move || {

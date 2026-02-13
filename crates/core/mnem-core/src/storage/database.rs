@@ -317,15 +317,17 @@ impl Database {
 
     pub fn get_history(&self, file_path: &str) -> AppResult<Vec<Snapshot>> {
         let conn = self.conn();
+        let pattern_win = format!("%{}%", file_path.replace('/', "\\"));
+        let pattern_unix = format!("%{}%", file_path.replace('\\', "/"));
         let mut stmt = conn
             .prepare(
                 "SELECT id, file_path, timestamp, content_hash, git_branch, session_id, commit_hash
-             FROM snapshots WHERE file_path = ?1 ORDER BY id DESC",
+             FROM snapshots WHERE file_path LIKE ?1 ESCAPE '/' OR file_path LIKE ?2 ESCAPE '/' ORDER BY id DESC",
             )
             .map_err(AppError::Database)?;
 
         let rows = stmt
-            .query_map([file_path], |row| {
+            .query_map([&pattern_win, &pattern_unix], |row| {
                 Ok(Snapshot {
                     id: row.get(0)?,
                     file_path: row.get(1)?,
@@ -708,6 +710,14 @@ impl Database {
         Ok(count as usize)
     }
 
+    pub fn get_symbol_count(&self) -> AppResult<usize> {
+        let conn = self.conn();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM symbols", [], |row| row.get(0))
+            .map_err(AppError::Database)?;
+        Ok(count as usize)
+    }
+
     pub fn delete_all(&self) -> AppResult<usize> {
         let conn = self.conn();
         let _ = conn.execute("DELETE FROM snapshot_chunks", []);
@@ -957,16 +967,19 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_checkpoint_by_hash(&self, hash_query: &str) -> AppResult<Option<(String, String)>> {
+    pub fn get_checkpoint_by_hash(
+        &self,
+        hash_query: &str,
+    ) -> AppResult<Option<(String, String, Option<String>)>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT timestamp, file_states FROM project_checkpoints WHERE hash LIKE ?1 LIMIT 1",
+                "SELECT timestamp, file_states, description FROM project_checkpoints WHERE hash LIKE ?1 LIMIT 1",
             )
             .map_err(AppError::Database)?;
         let mut rows = stmt
             .query_map([format!("{}%", hash_query)], |row| {
-                Ok((row.get(0)?, row.get(1)?))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             })
             .map_err(AppError::Database)?;
 
@@ -1141,12 +1154,12 @@ impl Database {
         Ok(conn.last_insert_rowid())
     }
 
-    pub fn insert_symbol_delta(&self, delta: &crate::models::SemanticDelta) -> AppResult<i64> {
+    pub fn insert_symbol_delta(&self, delta: &crate::models::SemanticRecord) -> AppResult<i64> {
         let kind_str = match delta.kind {
-            crate::models::DeltaKind::Added => "Added",
-            crate::models::DeltaKind::Modified => "Modified",
-            crate::models::DeltaKind::Deleted => "Deleted",
-            crate::models::DeltaKind::Renamed => "Renamed",
+            crate::models::RecordKind::Added => "Added",
+            crate::models::RecordKind::Modified => "Modified",
+            crate::models::RecordKind::Deleted => "Deleted",
+            crate::models::RecordKind::Renamed => "Renamed",
         };
 
         let conn = self.conn();
@@ -1169,7 +1182,7 @@ impl Database {
     pub fn get_symbol_deltas(
         &self,
         symbol_name: &str,
-    ) -> AppResult<Vec<crate::models::SemanticDelta>> {
+    ) -> AppResult<Vec<crate::models::SemanticRecord>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT id, from_snapshot_id, to_snapshot_id, symbol_name, new_name, delta_kind, structural_hash
@@ -1182,14 +1195,14 @@ impl Database {
             .query_map([symbol_name], |row| {
                 let kind_str: String = row.get(5)?;
                 let kind = match kind_str.as_str() {
-                    "Added" => crate::models::DeltaKind::Added,
-                    "Modified" => crate::models::DeltaKind::Modified,
-                    "Deleted" => crate::models::DeltaKind::Deleted,
-                    "Renamed" => crate::models::DeltaKind::Renamed,
-                    _ => crate::models::DeltaKind::Modified,
+                    "Added" => crate::models::RecordKind::Added,
+                    "Modified" => crate::models::RecordKind::Modified,
+                    "Deleted" => crate::models::RecordKind::Deleted,
+                    "Renamed" => crate::models::RecordKind::Renamed,
+                    _ => crate::models::RecordKind::Modified,
                 };
 
-                Ok(crate::models::SemanticDelta {
+                Ok(crate::models::SemanticRecord {
                     id: row.get(0)?,
                     project_id: None,
                     from_snapshot_id: row.get(1)?,

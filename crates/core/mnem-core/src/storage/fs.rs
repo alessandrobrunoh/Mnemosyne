@@ -278,6 +278,20 @@ impl CasStorage {
         self.base_dir.join("objects").join(hash).exists()
     }
 
+    /// Get the size of an object by hash.
+    pub fn get_size(&self, hash: &str) -> AppResult<u64> {
+        validate_hash(hash)?;
+        let path = self.object_path(hash);
+        if path.exists() {
+            return Ok(fs::metadata(&path).map_err(AppError::IoGeneric)?.len());
+        }
+        let legacy = self.base_dir.join("objects").join(hash);
+        if legacy.exists() {
+            return Ok(fs::metadata(&legacy).map_err(AppError::IoGeneric)?.len());
+        }
+        Err(AppError::NotFound(format!("Object {} not found", hash)))
+    }
+
     /// Delete an object by hash (used by GC to clean orphan files, audit 3.2).
     pub fn delete(&self, hash: &str) -> AppResult<()> {
         validate_hash(hash)?;

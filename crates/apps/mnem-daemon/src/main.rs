@@ -42,7 +42,7 @@ async fn restore_watched_projects(base_dir: &PathBuf, state: &Arc<DaemonState>) 
         match Repository::open(base_dir.clone(), project_path.clone()) {
             Ok(repo) => {
                 let repo = Arc::new(repo);
-                let monitor = Arc::new(Monitor::new(project_path, repo.clone()));
+                let monitor = Arc::new(Monitor::with_state(project_path, repo.clone(), state.clone()));
 
                 let scan_path = path_key.clone();
                 let monitor_scan = monitor.clone();

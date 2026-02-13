@@ -28,7 +28,7 @@ pub enum AppError {
     Semantic(String),
 
     #[error("SDP error: {0}")]
-    Sdp(#[from] semantic_delta_protocol::SdpError),
+    Sdp(#[from] semantic_delta_protocol::SrpError),
 
     #[error("Protocol error: {0}")]
     Protocol(String),

@@ -1,0 +1,8 @@
+[Mnemosyne CLI]
+- [x] Controllare come mai ci mette 5s pieni per caricare "mnem"
+- [ ] Creare un comando per purgiare tutti i logs/progetti/ e altro
+- [ ] Da Windows con Ctrl-Click non apre il file
+- [ ] Controllare se in "mnem status" lo Storage viene visto per bene
+- [ ] Creare un template per gli "Usage:" UI
+- [ ] fare "mnem watch ."
+- [ ] Il comando restore da errore: Error: Internal error: Daemon error (-32601): Method not found: mnem/snapshot/restore

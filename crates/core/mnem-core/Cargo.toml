@@ -1,7 +1,7 @@
 [package]
 name = "mnem-core"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 semantic-delta-protocol.workspace = true
@@ -9,6 +9,8 @@ rusqlite.workspace = true
 r2d2.workspace = true
 r2d2_sqlite.workspace = true
 blake3.workspace = true
+notify.workspace = true
+log.workspace = true
 
 chrono.workspace = true
 anyhow.workspace = true
@@ -19,15 +21,23 @@ zstd.workspace = true
 dirs.workspace = true
 toml.workspace = true
 tempfile.workspace = true
- rayon.workspace = true
+rayon.workspace = true
 similar.workspace = true
 streaming-iterator.workspace = true
 fastcdc.workspace = true
 uuid.workspace = true
 bytes.workspace = true
-lasso.workspace = true
-memmap2.workspace = true
-
+lru.workspace = true
+ignore.workspace = true
+content_inspector.workspace = true
+memmap2 = "0.9"
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_Security",
+] }
 
 tree-sitter.workspace = true
 tree-sitter-rust.workspace = true
@@ -39,11 +49,7 @@ tree-sitter-c.workspace = true
 tree-sitter-cpp.workspace = true
 tree-sitter-java.workspace = true
 tree-sitter-ruby.workspace = true
-tree-sitter-c-sharp.workspace = true
-tree-sitter-php.workspace = true
 tree-sitter-json.workspace = true
 tree-sitter-html.workspace = true
 tree-sitter-css.workspace = true
 tree-sitter-md.workspace = true
-libc = "0.2"
-windows-sys.workspace = true

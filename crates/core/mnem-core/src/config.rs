@@ -154,7 +154,8 @@ Gemfile.lock
         let parent = path.parent().unwrap_or(std::path::Path::new("."));
         let temp = tempfile::NamedTempFile::new_in(parent).map_err(AppError::IoGeneric)?;
         std::fs::write(temp.path(), &content).map_err(AppError::IoGeneric)?;
-        temp.persist(path).map_err(|e| AppError::IoGeneric(e.error))?;
+        temp.persist(path)
+            .map_err(|e| AppError::IoGeneric(e.error))?;
         Ok(())
     }
 

@@ -1,71 +1,36 @@
-use crossterm::style::Color;
+//! Theme system for mnem-cli terminal UI
+//!
+//! This module provides a theming system with:
+//! - Color palettes (currently Mnemosyne only)
+//! - Theme configuration
+//! - Builder pattern for custom themes
+//!
+//! # Example
+//! ```rust
+//! use mnem_cli::theme::{Theme, ThemeBuilder};
+//!
+//! // Get default theme
+//! let theme = Theme::default();
+//!
+//! // Customize with builder
+//! let custom = ThemeBuilder::new()
+//!     .accent(crossterm::style::Color::Cyan)
+//!     .build();
+//! ```
 
-#[derive(Clone, Debug)]
-pub struct Theme {
-    pub accent: Color,
-    pub active: Color,
-    pub secondary: Color,
-    pub text_dim: Color,
-    pub success: Color,
-    pub error: Color,
-    pub warning: Color,
-    pub border: Color,
-}
+// Module declarations
+pub mod builder;
+pub mod palette;
+pub mod theme;
 
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            accent: Color::Rgb {
-                r: 163,
-                g: 133,
-                b: 255,
-            }, // #A385FF
-            active: Color::Rgb {
-                r: 109,
-                g: 255,
-                b: 216,
-            }, // #6DFFD8
-            secondary: Color::Rgb {
-                r: 102,
-                g: 102,
-                b: 102,
-            }, // #666666
-            text_dim: Color::Rgb {
-                r: 102,
-                g: 102,
-                b: 102,
-            },
-            success: Color::Green,
-            error: Color::Red,
-            warning: Color::Yellow,
-            border: Color::DarkGrey,
-        }
-    }
-}
+// Re-exports from palette module
+pub use palette::{Palette, MNEMOSYNE};
 
-pub const DEFAULT: Theme = Theme {
-    accent: Color::Rgb {
-        r: 163,
-        g: 133,
-        b: 255,
-    },
-    active: Color::Rgb {
-        r: 109,
-        g: 255,
-        b: 216,
-    },
-    secondary: Color::Rgb {
-        r: 102,
-        g: 102,
-        b: 102,
-    },
-    text_dim: Color::Rgb {
-        r: 102,
-        g: 102,
-        b: 102,
-    },
-    success: Color::Green,
-    error: Color::Red,
-    warning: Color::Yellow,
-    border: Color::DarkGrey,
-};
+// Re-exports from theme module
+pub use theme::Theme;
+
+// Re-exports from builder module
+pub use builder::{get_theme, ThemeBuilder};
+
+// Re-export helper functions from palette
+pub use palette::{default as default_palette, from_name, list_available};

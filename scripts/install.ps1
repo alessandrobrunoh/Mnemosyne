@@ -75,11 +75,11 @@ if ($CurrentPath -split ';' -notcontains $BinDir -and $CurrentPath -split ';' -n
 
 # 5. Finalize
 Write-Host ""
-Write-Host "✓ Mnemosyne is ready!" -ForegroundColor Green
+Write-Host "Mnemosyne is ready!" -ForegroundColor Green
 Write-Host "---------------------------------------------------" -ForegroundColor Cyan
 Write-Host "Next steps:" -ForegroundColor White
 Write-Host "1. Close and reopen your terminal (PowerShell, CMD, etc.)" -ForegroundColor Gray
-Write-Host "2. Type 'mnem start' to launch the background engine" -ForegroundColor Gray
-Write-Host "3. Type 'mnem watch' in your project folder to start tracking" -ForegroundColor Gray
+Write-Host "2. Type 'mnem on' to launch the background engine" -ForegroundColor Gray
+Write-Host "3. Type 'mnem track' in your project folder to start tracking" -ForegroundColor Gray
 Write-Host "---------------------------------------------------" -ForegroundColor Cyan
-Write-Host "To uninstall, run: mnem stop && rd /s /q $InstallDir" -ForegroundColor DarkGray
+Write-Host "To uninstall, run: mnem off" -ForegroundColor DarkGray
