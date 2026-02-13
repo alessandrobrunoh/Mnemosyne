@@ -294,6 +294,7 @@ pub mod methods {
     pub const SESSION_GET_TIMESHEET: &str = "mnem/session/timesheet";
     pub const PROJECT_CREATE_CHECKPOINT: &str = "mnem/project/checkpoint";
     pub const PROJECT_REVERT_V1: &str = "mnem/project/revert";
+    pub const PROJECT_RELOAD: &str = "mnem/project/reload";
     pub const MAINTENANCE_GC: &str = "mnem/maintenance/gc";
     pub const CONFIG_GET_V1: &str = "mnem/config/get";
     pub const CONFIG_SET_V1: &str = "mnem/config/set";
