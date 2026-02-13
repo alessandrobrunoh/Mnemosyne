@@ -3,22 +3,14 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod config;
-mod cp;
-mod diff;
 mod gc;
-mod git;
 mod history_new;
 mod info;
 mod off;
 mod on;
-mod open;
-mod refs;
 mod restore;
 mod search;
-mod stats;
 mod status;
-mod symbols;
-mod timeline;
 mod track;
 
 mod theme;
@@ -98,22 +90,6 @@ enum Commands {
         #[arg(long, short)]
         limit: Option<usize>,
     },
-    #[command(about = "Show diff between versions")]
-    D {
-        file: Option<String>,
-        #[arg(long)]
-        from: Option<usize>,
-        #[arg(long)]
-        to: Option<usize>,
-    },
-    #[command(about = "Open file in IDE")]
-    Open {
-        file: Option<String>,
-        #[arg(long, short)]
-        at: Option<usize>,
-        #[arg(long)]
-        checkpoint: Option<String>,
-    },
     #[command(about = "Search code in history")]
     S {
         query: Option<String>,
@@ -123,48 +99,6 @@ enum Commands {
         limit: Option<usize>,
         #[arg(long)]
         semantic: bool,
-    },
-    #[command(about = "Manage checkpoints")]
-    Cp {
-        message: Option<String>,
-        #[arg(long, short)]
-        list: bool,
-        id: Option<String>,
-        #[arg(long)]
-        info: bool,
-        #[arg(long)]
-        remove: bool,
-        #[arg(long)]
-        restore: bool,
-    },
-    #[command(about = "Git integration")]
-    Git {
-        #[arg(long)]
-        commits: bool,
-        #[arg(long)]
-        log: bool,
-        #[arg(long)]
-        hook: bool,
-    },
-    #[command(about = "Show symbols in file")]
-    Symbols {
-        file: Option<String>,
-        #[arg(long, short)]
-        search: Option<String>,
-        #[arg(long)]
-        modified: bool,
-    },
-    #[command(about = "Show symbol timeline")]
-    Timeline {
-        symbol: Option<String>,
-        #[arg(long, short)]
-        diff: bool,
-    },
-    #[command(about = "Find symbol references")]
-    Refs {
-        symbol: Option<String>,
-        #[arg(long)]
-        since: Option<String>,
     },
     #[command(about = "Show project info")]
     Info { project: Option<String> },
@@ -216,34 +150,12 @@ fn main() -> Result<()> {
         }) => restore::handle_r(
             file, version, list, undo, to, symbol, checkpoint, branch, limit,
         ),
-        Some(Commands::D { file, from, to }) => diff::handle_d(file, from, to),
-        Some(Commands::Open {
-            file,
-            at,
-            checkpoint,
-        }) => open::handle_open(file, at, checkpoint),
         Some(Commands::S {
             query,
             file,
             limit,
             semantic,
         }) => search::handle_s(query, file, limit, semantic),
-        Some(Commands::Cp {
-            message,
-            list,
-            id,
-            info,
-            remove,
-            restore,
-        }) => cp::handle_cp(message, list, id, info, remove, restore),
-        Some(Commands::Git { commits, log, hook }) => git::handle_git(commits, log, hook),
-        Some(Commands::Symbols {
-            file,
-            search,
-            modified,
-        }) => symbols::handle_symbols(file, search, modified),
-        Some(Commands::Timeline { symbol, diff }) => timeline::handle_timeline(symbol, diff),
-        Some(Commands::Refs { symbol, since }) => refs::handle_refs(symbol, since),
         Some(Commands::Info { project }) => info::handle_info(project),
         Some(Commands::Gc {
             keep,
