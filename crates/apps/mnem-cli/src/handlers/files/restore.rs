@@ -1,25 +1,53 @@
-
 use anyhow::Result;
 
 use crate::handlers::files::history::compute_diff_stats;
 use crate::ui::Layout;
+use mnem_core::client::DaemonClient;
+use mnem_core::protocol::SnapshotInfo;
+use mnem_core::protocol::methods;
 use mnem_core::storage::Repository;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-fn check_project_tracked(layout: &Layout) -> Result<(PathBuf, PathBuf, Repository)> {
+fn get_project_from_file(file: &Option<String>) -> Result<PathBuf> {
     use mnem_core::env::get_base_dir;
 
-    let base_dir = get_base_dir()?;
     let cwd = std::env::current_dir()?;
-    let tracked_file = cwd.join(".mnemosyne").join("tracked");
+    let project_path = if let Some(f) = file {
+        let file_path = std::path::Path::new(f);
+        let resolved = if file_path.is_relative() {
+            cwd.join(file_path)
+        } else {
+            file_path.to_path_buf()
+        };
+        resolved.parent().map(|p| p.to_path_buf()).unwrap_or(cwd)
+    } else {
+        cwd
+    };
+
+    let tracked_file = project_path.join(".mnemosyne").join("tracked");
+    if !tracked_file.exists() {
+        anyhow::bail!("Project not tracked: {:?}", project_path);
+    }
+
+    Ok(project_path)
+}
+
+fn check_project_tracked(
+    layout: &Layout,
+    file: &Option<String>,
+) -> Result<(PathBuf, PathBuf, Repository)> {
+    use mnem_core::env::get_base_dir;
+
+    let project_path = get_project_from_file(file)?;
+    let tracked_file = project_path.join(".mnemosyne").join("tracked");
 
     if !tracked_file.exists() {
         layout.header_dashboard("PROJECT NOT TRACKED");
-        layout.section_branch("pr", "Current Folder");
-        layout.row_labeled("◫", "Path", &cwd.to_string_lossy());
+        layout.section_branch("pr", "Project Folder");
+        layout.row_labeled("◫", "Path", &project_path.to_string_lossy());
         layout.section_end();
         layout.empty();
         layout.badge_error("ERROR", "This project is not tracked");
@@ -27,8 +55,9 @@ fn check_project_tracked(layout: &Layout) -> Result<(PathBuf, PathBuf, Repositor
         anyhow::bail!("Project not tracked");
     }
 
-    let repo = Repository::open(base_dir.clone(), cwd.clone())?;
-    Ok((base_dir, cwd, repo))
+    let base_dir = get_base_dir()?;
+    let repo = Repository::open(base_dir.clone(), project_path.clone())?;
+    Ok((base_dir, project_path, repo))
 }
 
 fn cleanup_old_temp_files() {
@@ -70,7 +99,7 @@ pub fn handle_r(
     use mnem_core::env::get_base_dir;
 
     let layout = Layout::new();
-    let (_, cwd, repo) = match check_project_tracked(&layout) {
+    let (_, cwd, repo) = match check_project_tracked(&layout, &file) {
         Ok(r) => r,
         Err(_) => return Ok(()),
     };
@@ -80,8 +109,49 @@ pub fn handle_r(
 
     cleanup_old_temp_files();
 
+    // Try daemon first for list
     if list {
         if let Some(ref f) = file {
+            // Try daemon first
+            let full_path = if std::path::Path::new(f).is_absolute() {
+                f.clone()
+            } else {
+                cwd.join(f).to_string_lossy().to_string()
+            };
+
+            if let Ok(mut client) = DaemonClient::connect() {
+                if let Ok(res) = client.call(
+                    methods::SNAPSHOT_LIST,
+                    serde_json::json!({ "file_path": full_path }),
+                ) {
+                    if let Ok(history) = serde_json::from_value::<Vec<SnapshotInfo>>(res) {
+                        if !history.is_empty() {
+                            layout.header_dashboard("RESTORE VERSIONS");
+                            layout.section_branch("fi", f);
+                            layout.item_simple(&format!("Found {} versions", history.len()));
+                            for (i, snap) in history.iter().take(limit.unwrap_or(50)).enumerate() {
+                                let hash_short =
+                                    &snap.content_hash[..8.min(snap.content_hash.len())];
+                                layout.row_version_with_link(
+                                    i + 1,
+                                    hash_short,
+                                    &snap.content_hash,
+                                    &snap.file_path,
+                                    &snap.timestamp,
+                                    i == 0,
+                                    None,
+                                    &ide,
+                                );
+                            }
+                            layout.section_end();
+                            layout.footer("Use 'mnem r <file> <version>' to restore");
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // Fallback to direct
             let clean_path = if f.starts_with(".\\") {
                 &f[2..]
             } else if f.starts_with("./") {
