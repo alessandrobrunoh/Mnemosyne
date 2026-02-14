@@ -1,13 +1,15 @@
 use crate::ui::Layout;
 use anyhow::Result;
+use mnem_core::client::DaemonClient;
+use mnem_core::env::get_base_dir;
+use mnem_core::protocol::SnapshotInfo;
+use mnem_core::protocol::methods;
 use mnem_core::storage::Repository;
 use similar::{ChangeTag, TextDiff};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-fn check_project_tracked(layout: &Layout) -> Result<(PathBuf, PathBuf, Repository)> {
-    use mnem_core::env::get_base_dir;
-
+fn check_project_tracked(layout: &Layout) -> Result<(PathBuf, PathBuf)> {
     let base_dir = get_base_dir()?;
     let cwd = std::env::current_dir()?;
     let tracked_file = cwd.join(".mnemosyne").join("tracked");
@@ -23,8 +25,7 @@ fn check_project_tracked(layout: &Layout) -> Result<(PathBuf, PathBuf, Repositor
         anyhow::bail!("Project not tracked");
     }
 
-    let repo = Repository::open(base_dir.clone(), cwd.clone())?;
-    Ok((base_dir, cwd, repo))
+    Ok((base_dir, cwd))
 }
 
 pub fn handle_h(
@@ -37,18 +38,20 @@ pub fn handle_h(
     let layout = Layout::new();
 
     // Determine the project path: use file's directory if provided, otherwise cwd
+    let cwd = std::env::current_dir()?;
     let project_path = if let Some(ref f) = file {
         let file_path = std::path::Path::new(f);
-        if file_path.is_relative() {
-            std::env::current_dir()?.join(file_path)
+        let resolved_path = if file_path.is_relative() {
+            cwd.join(file_path)
         } else {
             file_path.to_path_buf()
-        }
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+        };
+        resolved_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or(cwd)
     } else {
-        std::env::current_dir().unwrap_or_default()
+        cwd
     };
 
     // Check if this project is tracked
@@ -64,21 +67,44 @@ pub fn handle_h(
         return Ok(());
     }
 
-    use mnem_core::env::get_base_dir;
-    let base_dir = get_base_dir()?;
-    let repo = Repository::open(base_dir, project_path.clone())?;
-
     let limit = limit.unwrap_or(20);
 
     if timeline {
         return handle_timeline_view(file, &layout);
     }
 
+    // Try daemon first, fallback to direct access only on connection errors
+    // Don't retry on lock errors (daemon is running)
     if let Some(ref f) = file {
-        return handle_file_history(f, limit, &layout, &repo);
+        match try_daemon_file_history(f, limit, &layout, &project_path) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Only fallback if it's a connection error, not a lock error
+                let err_str = format!("{}", e);
+                if err_str.contains("lock") || err_str.contains("Database already open") {
+                    // Daemon is running, the lock is expected - show error
+                    layout.error("Cannot access history while daemon is running. Run 'mnem off' first or wait for operations to complete.");
+                    return Ok(());
+                }
+                // For other errors, try direct access
+                handle_file_history_direct(f, limit, &layout, &project_path)
+            }
+        }
+    } else {
+        match try_daemon_dashboard_view(limit, &layout, &project_path) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let err_str = format!("{}", e);
+                if err_str.contains("lock") || err_str.contains("Database already open") {
+                    layout.error(
+                        "Cannot access history while daemon is running. Run 'mnem off' first.",
+                    );
+                    return Ok(());
+                }
+                handle_dashboard_view_direct(limit, &layout, &project_path)
+            }
+        }
     }
-
-    handle_dashboard_view(limit, &layout, &repo, &project_path)
 }
 
 fn handle_timeline_view(file: Option<String>, layout: &Layout) -> Result<()> {
@@ -93,7 +119,39 @@ fn handle_timeline_view(file: Option<String>, layout: &Layout) -> Result<()> {
     Ok(())
 }
 
-fn handle_file_history(f: &str, limit: usize, layout: &Layout, repo: &Repository) -> Result<()> {
+// Try to use daemon for file history
+fn try_daemon_file_history(
+    f: &str,
+    limit: usize,
+    layout: &Layout,
+    project_path: &std::path::Path,
+) -> Result<()> {
+    let mut client = DaemonClient::connect()?;
+    let full_path = if std::path::Path::new(f).is_absolute() {
+        f.to_string()
+    } else {
+        project_path.join(f).to_string_lossy().to_string()
+    };
+
+    let res = client.call(
+        methods::SNAPSHOT_LIST,
+        serde_json::json!({ "file_path": full_path }),
+    )?;
+
+    let history: Vec<SnapshotInfo> = serde_json::from_value(res)?;
+    display_file_history(f, limit, layout, history)
+}
+
+// Fallback: direct database access for file history
+fn handle_file_history_direct(
+    f: &str,
+    limit: usize,
+    layout: &Layout,
+    project_path: &std::path::Path,
+) -> Result<()> {
+    let base_dir = get_base_dir()?;
+    let repo = Repository::open(base_dir, project_path.to_path_buf())?;
+
     let clean_path = if f.starts_with(".\\") {
         &f[2..]
     } else if f.starts_with("./") {
@@ -101,7 +159,39 @@ fn handle_file_history(f: &str, limit: usize, layout: &Layout, repo: &Repository
     } else {
         f
     };
-    let history = repo.get_history(clean_path)?;
+
+    let history_db = repo.get_history(clean_path)?;
+
+    // Convert to SnapshotInfo format
+    let history: Vec<SnapshotInfo> = history_db
+        .into_iter()
+        .map(|sn| SnapshotInfo {
+            id: sn.id,
+            file_path: sn.file_path,
+            timestamp: sn.timestamp,
+            content_hash: sn.content_hash,
+            git_branch: sn.git_branch,
+            commit_hash: sn.commit_hash,
+            commit_message: None,
+        })
+        .collect();
+
+    display_file_history(f, limit, layout, history)
+}
+
+fn display_file_history(
+    f: &str,
+    limit: usize,
+    layout: &Layout,
+    history: Vec<SnapshotInfo>,
+) -> Result<()> {
+    let clean_path = if f.starts_with(".\\") {
+        &f[2..]
+    } else if f.starts_with("./") {
+        &f[2..]
+    } else {
+        f
+    };
 
     layout.header_dashboard("FILE HISTORY");
     layout.section_branch("fi", clean_path);
@@ -134,12 +224,7 @@ fn handle_file_history(f: &str, limit: usize, layout: &Layout, repo: &Repository
                 ""
             };
 
-            // Calculate diff stats
-            let prev_snap = history.get(i + 1);
-            let prev_hash = prev_snap.map(|s| s.content_hash.as_str());
-            let diff_stats = compute_diff_stats(repo, &snap.content_hash, prev_hash);
-
-            layout.row_history_compact(hash_short, "M", clean_path, time_only, i == 0, diff_stats);
+            layout.row_history_compact(hash_short, "M", clean_path, time_only, i == 0, None);
         }
         layout.footer_pagination(history.len().min(limit), history.len(), limit);
     }
@@ -148,14 +233,75 @@ fn handle_file_history(f: &str, limit: usize, layout: &Layout, repo: &Repository
     Ok(())
 }
 
-fn handle_dashboard_view(
+// Try to use daemon for dashboard view
+fn try_daemon_dashboard_view(
     limit: usize,
     layout: &Layout,
-    repo: &Repository,
-    cwd: &std::path::Path,
+    project_path: &std::path::Path,
 ) -> Result<()> {
-    let history = repo.get_recent_activity(limit)?;
+    let mut client = DaemonClient::connect()?;
 
+    let res = client.call(
+        methods::PROJECT_GET_ACTIVITY,
+        serde_json::json!({
+            "limit": limit,
+            "project_path": project_path.to_string_lossy().to_string()
+        }),
+    )?;
+
+    let history: Vec<SnapshotInfo> = serde_json::from_value(res)?;
+
+    // Get project name from tracked file
+    let tracked_file = project_path.join(".mnemosyne").join("tracked");
+    let project_name = if let Ok(content) = std::fs::read_to_string(&tracked_file) {
+        content
+            .lines()
+            .find(|l| l.starts_with("project_name:"))
+            .map(|l| l.split(':').nth(1).unwrap_or("").trim().to_string())
+            .unwrap_or_else(|| "Unknown".to_string())
+    } else {
+        "Unknown".to_string()
+    };
+
+    display_dashboard_view(limit, layout, project_path, project_name, history)
+}
+
+// Fallback: direct database access for dashboard view
+fn handle_dashboard_view_direct(
+    limit: usize,
+    layout: &Layout,
+    project_path: &std::path::Path,
+) -> Result<()> {
+    let base_dir = get_base_dir()?;
+    let repo = Repository::open(base_dir, project_path.to_path_buf())?;
+
+    let history_db = repo.get_recent_activity(limit)?;
+
+    // Convert to SnapshotInfo format
+    let history: Vec<SnapshotInfo> = history_db
+        .into_iter()
+        .map(|sn| SnapshotInfo {
+            id: sn.id,
+            file_path: sn.file_path,
+            timestamp: sn.timestamp,
+            content_hash: sn.content_hash,
+            git_branch: sn.git_branch,
+            commit_hash: sn.commit_hash,
+            commit_message: None,
+        })
+        .collect();
+
+    let project_name = repo.project.name.clone();
+    display_dashboard_view(limit, layout, project_path, project_name, history)
+}
+
+fn display_dashboard_view(
+    limit: usize,
+    layout: &Layout,
+    project_path: &std::path::Path,
+    project_name: String,
+    history: Vec<SnapshotInfo>,
+) -> Result<()> {
     let mut by_branch: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for snap in &history {
         let branch = snap
@@ -165,57 +311,13 @@ fn handle_dashboard_view(
         by_branch.entry(branch).or_default().push(snap);
     }
 
-    layout.header_dashboard(&format!("HISTORY: {}", repo.project.name));
+    layout.header_dashboard(&format!("HISTORY: {}", project_name));
 
-    layout.section_branch("cp", "Checkpoints");
-    if let Ok(checkpoints) = repo.list_checkpoints() {
-        if !checkpoints.is_empty() {
-            for (hash, ts, desc) in checkpoints.iter().take(5) {
-                let hash_short = &hash[..8.min(hash.len())];
-                let timestamp_parts: Vec<&str> = ts.split('T').collect();
-                let date_time = if timestamp_parts.len() > 1 {
-                    let time_parts: Vec<&str> = timestamp_parts[1].split('.').collect();
-                    format!("{} {}", timestamp_parts[0], time_parts[0])
-                } else {
-                    ts.to_string()
-                };
-
-                let msg = desc.as_deref().unwrap_or("No description");
-                layout.row_history_compact(hash_short, "CP", msg, &date_time, false, None);
-            }
-        } else {
-            layout.item_simple("No checkpoints");
-        }
-    }
-    layout.section_end();
-
-    layout.section_branch("git", "Git Commits");
-    if let Ok(commits) = repo.list_commits() {
-        if !commits.is_empty() {
-            for (hash, author, msg, ts, files) in commits.iter().take(5) {
-                let hash_short = &hash[..8.min(hash.len())];
-                let timestamp_parts: Vec<&str> = ts.split('T').collect();
-                let date_time = if timestamp_parts.len() > 1 {
-                    let time_parts: Vec<&str> = timestamp_parts[1].split('.').collect();
-                    format!("{} {}", timestamp_parts[0], time_parts[0])
-                } else {
-                    ts.to_string()
-                };
-
-                let desc = format!("{} files  {} - {}", files, author, msg);
-                layout.row_history_compact(hash_short, "GIT", &desc, &date_time, false, None);
-            }
-        } else {
-            layout.item_simple("No commits");
-        }
-    }
-    layout.section_end();
-
-    for (branch_name, snaps) in &by_branch {
-        let branch_icon = if branch_name == "main" { "ma" } else { "br" };
-        layout.section_branch(branch_icon, branch_name);
-
-        for (i, snap) in snaps.iter().enumerate() {
+    layout.section_branch("rc", "Recent Activity");
+    if history.is_empty() {
+        layout.item_simple("No recent activity");
+    } else {
+        for (i, snap) in history.iter().take(10).enumerate() {
             let hash_short = if snap.content_hash.len() >= 8 {
                 &snap.content_hash[..8]
             } else {
@@ -233,33 +335,16 @@ fn handle_dashboard_view(
 
             let p = snap.file_path.replace("\\\\?\\", "");
             let p_path = std::path::Path::new(&p);
-            let display_path = if let Ok(rel) = p_path.strip_prefix(cwd) {
+            let display_path = if let Ok(rel) = p_path.strip_prefix(project_path) {
                 rel.to_string_lossy().to_string()
             } else {
-                p.to_string()
+                p
             };
 
-            let mut prev_hash = None;
-            for next_snap in snaps.iter().skip(i + 1) {
-                if next_snap.file_path == snap.file_path {
-                    prev_hash = Some(next_snap.content_hash.as_str());
-                    break;
-                }
-            }
-
-            let diff_stats = compute_diff_stats(repo, &snap.content_hash, prev_hash);
-
-            layout.row_history_compact(
-                hash_short,
-                "M",
-                &display_path,
-                time_only,
-                i == 0,
-                diff_stats,
-            );
+            layout.row_history_compact(hash_short, "M", &display_path, time_only, i == 0, None);
         }
-        layout.section_end();
     }
+    layout.section_end();
 
     layout.legend(&[
         ("● Latest", ""),
