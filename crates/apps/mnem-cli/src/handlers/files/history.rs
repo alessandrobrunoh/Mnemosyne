@@ -35,10 +35,38 @@ pub fn handle_h(
     _branch: Option<String>,
 ) -> Result<()> {
     let layout = Layout::new();
-    let (_, cwd, repo) = match check_project_tracked(&layout) {
-        Ok(r) => r,
-        Err(_) => return Ok(()),
+
+    // Determine the project path: use file's directory if provided, otherwise cwd
+    let project_path = if let Some(ref f) = file {
+        let file_path = std::path::Path::new(f);
+        if file_path.is_relative() {
+            std::env::current_dir()?.join(file_path)
+        } else {
+            file_path.to_path_buf()
+        }
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+    } else {
+        std::env::current_dir().unwrap_or_default()
     };
+
+    // Check if this project is tracked
+    let tracked_file = project_path.join(".mnemosyne").join("tracked");
+    if !tracked_file.exists() {
+        layout.header_dashboard("PROJECT NOT TRACKED");
+        layout.section_branch("pr", "Project Path");
+        layout.row_labeled("◫", "Path", &project_path.to_string_lossy());
+        layout.section_end();
+        layout.empty();
+        layout.badge_error("ERROR", "This project is not tracked");
+        layout.info_bright("Run 'mnem track' to start tracking this project.");
+        return Ok(());
+    }
+
+    use mnem_core::env::get_base_dir;
+    let base_dir = get_base_dir()?;
+    let repo = Repository::open(base_dir, project_path.clone())?;
 
     let limit = limit.unwrap_or(20);
 
@@ -50,7 +78,7 @@ pub fn handle_h(
         return handle_file_history(f, limit, &layout, &repo);
     }
 
-    handle_dashboard_view(limit, &layout, &repo, &cwd)
+    handle_dashboard_view(limit, &layout, &repo, &project_path)
 }
 
 fn handle_timeline_view(file: Option<String>, layout: &Layout) -> Result<()> {
