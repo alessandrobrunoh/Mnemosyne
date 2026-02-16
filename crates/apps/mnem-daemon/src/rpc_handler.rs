@@ -948,8 +948,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             // Get PID
             let pid = child.id().unwrap_or(0);
 
-            // Store child process
-            *state.mcp_child.write() = Some(child);
+            // Store child process - scope the lock to ensure it's released
+            {
+                *state.mcp_child.write() = Some(child);
+            }
             state.mcp_running.store(true, Ordering::Relaxed);
 
             info!("MCP server started with PID {}", pid);
@@ -971,8 +973,11 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 return JsonRpcResponse::error(req.id, -32000, "MCP server not running".into());
             }
 
-            // Try to gracefully kill first
-            if let Some(ref mut child) = state.mcp_child.write().take() {
+            // Take child out of lock first
+            let child_opt = { state.mcp_child.write().take() };
+
+            // Now kill the child (outside the lock to avoid holding it across await)
+            if let Some(mut child) = child_opt {
                 let _ = child.kill().await;
             }
 
