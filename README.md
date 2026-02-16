@@ -46,8 +46,8 @@ mnem track
 mnem h
 
 # 4. Restore files
-mnem r                    # Interactive
-mnem r --version 5       # Specific version
+mnem r <path/to/file> --list       # See all versions
+mnem r <path/to/file> 1            # Restore verison 1
 ```
 
 ---
