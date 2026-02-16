@@ -112,6 +112,9 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 protocol::methods::PROJECT_GET_STATISTICS.to_string(),
                 protocol::methods::DAEMON_GET_STATUS.to_string(),
                 protocol::methods::SYMBOL_GET_SEMANTIC_HISTORY.to_string(),
+                protocol::methods::MCP_START.to_string(),
+                protocol::methods::MCP_STOP.to_string(),
+                protocol::methods::MCP_STATUS.to_string(),
             ];
             *state.server_capabilities.write() = Some(capabilities.clone());
 
