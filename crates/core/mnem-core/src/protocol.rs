@@ -301,6 +301,11 @@ pub mod methods {
     pub const TIER_CONFIG_GET_V1: &str = "mnem/tier/config/get";
     pub const TIER_CONFIG_SET_V1: &str = "mnem/tier/config/set";
     pub const DAEMON_GET_STATUS: &str = "mnem/daemon/status";
+
+    // MCP Server
+    pub const MCP_START: &str = "mnem/mcp/start";
+    pub const MCP_STOP: &str = "mnem/mcp/stop";
+    pub const MCP_STATUS: &str = "mnem/mcp/status";
 }
 
 /// Maps legacy method names to their v1.0 equivalents
@@ -609,4 +614,27 @@ pub struct TimesheetEntry {
     pub duration_minutes: u64,
     pub file_count: usize,
     pub snapshot_count: usize,
+}
+
+/// Parameters for starting the MCP server
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpStartParams {
+    /// Optional: specific transport to use (default: stdio)
+    #[serde(default)]
+    pub transport: Option<String>,
+}
+
+/// Parameters for stopping the MCP server
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpStopParams {
+    /// Force stop even if there are active connections
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Response for MCP server status
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpStatusResponse {
+    pub running: bool,
+    pub pid: Option<u32>,
 }

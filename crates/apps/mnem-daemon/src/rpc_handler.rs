@@ -1,17 +1,18 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use serde_json::json;
 use log::{error, info, warn};
+use serde_json::json;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mnem_core::env::get_base_dir;
-use mnem_core::protocol::{self, JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION};
-use mnem_core::protocol::{InitializeResult, InitializeParams, ServerInfo, ServerCapabilities};
-use mnem_core::protocol::jsonrpc_errors::*;
-use mnem_core::protocol::mnem_errors::*;
-use mnem_core::Repository;
 use crate::Monitor;
 use crate::state::{DaemonState, InitializationState};
+use mnem_core::Repository;
+use mnem_core::env::get_base_dir;
+use mnem_core::protocol::jsonrpc_errors::*;
+use mnem_core::protocol::mnem_errors::*;
+use mnem_core::protocol::{self, JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION};
+use mnem_core::protocol::{InitializeParams, InitializeResult, ServerCapabilities, ServerInfo};
 
 /// List of methods that can be called before initialization
 const UNRESTRICTED_METHODS: &[&str] = &[
@@ -23,24 +24,24 @@ const UNRESTRICTED_METHODS: &[&str] = &[
 
 pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> JsonRpcResponse {
     let start_instant = std::time::Instant::now();
-    
+
     // Normalize method name for backward compatibility
     let normalized_method = protocol::normalize_method_name(&req.method);
-    
+
     // Check initialization state (except for unrestricted methods)
     if !UNRESTRICTED_METHODS.contains(&normalized_method) {
         if !state.is_initialized() {
             return JsonRpcResponse::error(
                 req.id,
                 SERVER_NOT_INITIALIZED,
-                "Server not initialized. Call initialize first.".into()
+                "Server not initialized. Call initialize first.".into(),
             );
         }
         if state.is_shutdown() {
             return JsonRpcResponse::error(
                 req.id,
                 SHUTDOWN_IN_PROGRESS,
-                "Server is shutting down.".into()
+                "Server is shutting down.".into(),
             );
         }
     }
@@ -48,15 +49,15 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
     let response = match normalized_method {
         protocol::methods::INITIALIZE => {
             let current_state = *state.init_state.read();
-            
+
             if current_state == InitializationState::Shutdown {
                 return JsonRpcResponse::error(
                     req.id,
                     SHUTDOWN_IN_PROGRESS,
-                    "Server is shutting down.".into()
+                    "Server is shutting down.".into(),
                 );
             }
-            
+
             // If already initialized, just return the current capabilities successfully
             if current_state == InitializationState::Initialized {
                 let capabilities = state.server_capabilities.read().clone().unwrap_or_default();
@@ -68,14 +69,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     capabilities,
                     protocol_version: PROTOCOL_VERSION.to_string(),
                 };
-                return JsonRpcResponse::success(req.id, serde_json::to_value(result).unwrap_or(json!({})));
+                return JsonRpcResponse::success(
+                    req.id,
+                    serde_json::to_value(result).unwrap_or(json!({})),
+                );
             }
-            
+
             {
                 let mut init_lock = state.init_state.write();
                 *init_lock = InitializationState::Initializing;
             }
-            
+
             // Parse client capabilities
             let params: InitializeParams = match serde_json::from_value(req.params.clone()) {
                 Ok(p) => p,
@@ -85,14 +89,14 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     return JsonRpcResponse::error(
                         req.id,
                         INVALID_PARAMS,
-                        format!("Invalid initialize params: {}", e)
+                        format!("Invalid initialize params: {}", e),
                     );
                 }
             };
-            
+
             // Store client capabilities
             *state.client_capabilities.write() = Some(params.capabilities);
-            
+
             // Build server capabilities
             let mut capabilities = ServerCapabilities::default();
             capabilities.supported_methods = vec![
@@ -110,12 +114,12 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 protocol::methods::SYMBOL_GET_SEMANTIC_HISTORY.to_string(),
             ];
             *state.server_capabilities.write() = Some(capabilities.clone());
-            
+
             {
                 let mut init_lock = state.init_state.write();
                 *init_lock = InitializationState::Initialized;
             }
-            
+
             let result = InitializeResult {
                 server_info: ServerInfo {
                     name: "mnemosyne".to_string(),
@@ -124,7 +128,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 capabilities,
                 protocol_version: PROTOCOL_VERSION.to_string(),
             };
-            
+
             info!("Client initialized: {:?}", params.client_info);
             JsonRpcResponse::success(req.id, serde_json::to_value(result).unwrap_or(json!({})))
         }
@@ -141,7 +145,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         protocol::methods::STATUS | protocol::methods::DAEMON_GET_STATUS => {
             let total_reqs = state.total_requests.load(Ordering::Relaxed);
             let total_time = state.total_processing_time_us.load(Ordering::Relaxed);
-            
+
             let avg_time = if total_reqs > 0 {
                 (total_time as f64 / total_reqs as f64) / 1000.0
             } else {
@@ -184,38 +188,54 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
         protocol::methods::PROJECT_RELOAD => {
             info!("Reloading projects from registry...");
-            
+
             let base_dir = match get_base_dir() {
                 Ok(d) => d,
-                Err(e) => return JsonRpcResponse::error(req.id, -32603, format!("Failed to get base dir: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32603,
+                        format!("Failed to get base dir: {}", e),
+                    );
+                }
             };
-            
+
             let registry = match mnem_core::storage::registry::ProjectRegistry::new(&base_dir) {
                 Ok(r) => r,
-                Err(e) => return JsonRpcResponse::error(req.id, -32603, format!("Failed to load registry: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32603,
+                        format!("Failed to load registry: {}", e),
+                    );
+                }
             };
-            
+
             let projects = registry.list_projects();
             let total = projects.len();
             let mut loaded = 0;
-            
+
             for project in projects {
                 let project_path = std::path::PathBuf::from(&project.path);
                 if !project_path.exists() {
                     continue;
                 }
-                
+
                 // Skip if already loaded
                 if state.repos.contains_key(&project.path) {
                     loaded += 1;
                     continue;
                 }
-                
+
                 match Repository::open(base_dir.clone(), project_path.clone()) {
                     Ok(repo) => {
                         let repo = Arc::new(repo);
-                        let monitor = Arc::new(Monitor::with_state(project_path.clone(), repo.clone(), state.clone()));
-                        
+                        let monitor = Arc::new(Monitor::with_state(
+                            project_path.clone(),
+                            repo.clone(),
+                            state.clone(),
+                        ));
+
                         let scan_path = project.path.clone();
                         let monitor_scan = monitor.clone();
                         tokio::task::spawn_blocking(move || {
@@ -223,14 +243,14 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                 error!("Initial scan failed for {}: {}", scan_path, e);
                             }
                         });
-                        
+
                         let monitor_start = monitor.clone();
                         tokio::spawn(async move {
                             if let Err(e) = monitor_start.start().await {
                                 error!("Monitor loop failed: {}", e);
                             }
                         });
-                        
+
                         state.repos.insert(project.path.clone(), repo);
                         state.monitors.insert(project.path.clone(), monitor);
                         loaded += 1;
@@ -241,20 +261,32 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     }
                 }
             }
-            
+
             JsonRpcResponse::success(req.id, json!({"loaded": loaded, "total": total}))
         }
 
         protocol::methods::WATCH | protocol::methods::PROJECT_WATCH => {
             let params: protocol::WatchParams = match serde_json::from_value(req.params.clone()) {
                 Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32602,
+                        format!("Invalid params: {}", e),
+                    );
+                }
             };
 
             let path = std::path::Path::new(&params.project_path);
-            let blacklist = ["/", "/Users", "/Users/", "/var", "/tmp", "/etc", "/bin", "/sbin", "/usr"];
+            let blacklist = [
+                "/", "/Users", "/Users/", "/var", "/tmp", "/etc", "/bin", "/sbin", "/usr",
+            ];
             if blacklist.contains(&params.project_path.as_str()) || path.parent().is_none() {
-                return JsonRpcResponse::error(req.id, -32602, "Protected path cannot be watched".into());
+                return JsonRpcResponse::error(
+                    req.id,
+                    -32602,
+                    "Protected path cannot be watched".into(),
+                );
             }
 
             if state.monitors.contains_key(&params.project_path) {
@@ -263,14 +295,24 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             let base_dir = match get_base_dir() {
                 Ok(dir) => dir,
-                Err(e) => return JsonRpcResponse::error(req.id, -32000, format!("Failed to get base directory: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32000,
+                        format!("Failed to get base directory: {}", e),
+                    );
+                }
             };
             let project_path = PathBuf::from(&params.project_path);
 
             match Repository::open(base_dir, project_path.clone()) {
                 Ok(repo) => {
                     let repo = Arc::new(repo);
-                    let monitor = Arc::new(Monitor::with_state(project_path, repo.clone(), state.clone()));
+                    let monitor = Arc::new(Monitor::with_state(
+                        project_path,
+                        repo.clone(),
+                        state.clone(),
+                    ));
 
                     let monitor_scan = monitor.clone();
                     tokio::task::spawn_blocking(move || {
@@ -292,14 +334,22 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     info!("Watching project: {}", params.project_path);
                     JsonRpcResponse::success(req.id, json!({"status": "watching"}))
                 }
-                Err(e) => JsonRpcResponse::error(req.id, -32000, format!("Failed to open repo: {}", e)),
+                Err(e) => {
+                    JsonRpcResponse::error(req.id, -32000, format!("Failed to open repo: {}", e))
+                }
             }
         }
 
         protocol::methods::UNWATCH | protocol::methods::PROJECT_UNWATCH => {
             let params: protocol::UnwatchParams = match serde_json::from_value(req.params.clone()) {
                 Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32602,
+                        format!("Invalid params: {}", e),
+                    );
+                }
             };
 
             state.monitors.remove(&params.project_path);
@@ -309,9 +359,16 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::FILE_LIST | protocol::methods::FILE_GET_LIST => {
-            let params: protocol::FileListParams = match serde_json::from_value(req.params.clone()) {
+            let params: protocol::FileListParams = match serde_json::from_value(req.params.clone())
+            {
                 Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32602,
+                        format!("Invalid params: {}", e),
+                    );
+                }
             };
 
             let mut files = Vec::new();
@@ -334,10 +391,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::SNAPSHOT_HISTORY | protocol::methods::SNAPSHOT_LIST => {
-            let params: protocol::SnapshotHistoryParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::SnapshotHistoryParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let file_path = std::path::Path::new(&params.file_path);
             for repo_entry in state.repos.iter() {
@@ -357,7 +421,11 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                             })
                             .map(|sn| {
                                 let commit_message = sn.commit_hash.as_ref().and_then(|h| {
-                                    repo.db.get_git_commit(h).ok().flatten().map(|(msg, _, _)| msg)
+                                    repo.db
+                                        .get_git_commit(h)
+                                        .ok()
+                                        .flatten()
+                                        .map(|(msg, _, _)| msg)
                                 });
                                 protocol::SnapshotInfo {
                                     id: sn.id,
@@ -370,7 +438,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                 }
                             })
                             .collect();
-                        return JsonRpcResponse::success(req.id, serde_json::to_value(infos).unwrap_or(json!([])));
+                        return JsonRpcResponse::success(
+                            req.id,
+                            serde_json::to_value(infos).unwrap_or(json!([])),
+                        );
                     }
 
                     // Cache miss - fetch from database
@@ -378,7 +449,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                         Ok(history) => {
                             // Cache the result
                             state.cache_history(params.file_path.clone(), history.clone());
-                            
+
                             let infos: Vec<protocol::SnapshotInfo> = history
                                 .into_iter()
                                 .filter(|sn| {
@@ -390,7 +461,11 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                 })
                                 .map(|sn| {
                                     let commit_message = sn.commit_hash.as_ref().and_then(|h| {
-                                        repo.db.get_git_commit(h).ok().flatten().map(|(msg, _, _)| msg)
+                                        repo.db
+                                            .get_git_commit(h)
+                                            .ok()
+                                            .flatten()
+                                            .map(|(msg, _, _)| msg)
                                     });
                                     protocol::SnapshotInfo {
                                         id: sn.id,
@@ -403,7 +478,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                     }
                                 })
                                 .collect();
-                            return JsonRpcResponse::success(req.id, serde_json::to_value(infos).unwrap_or(json!([])));
+                            return JsonRpcResponse::success(
+                                req.id,
+                                serde_json::to_value(infos).unwrap_or(json!([])),
+                            );
                         }
                         Err(e) => return JsonRpcResponse::error(req.id, -32000, e.to_string()),
                     }
@@ -413,10 +491,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::SNAPSHOT_CONTENT | protocol::methods::SNAPSHOT_GET => {
-            let params: protocol::SnapshotContentParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::SnapshotContentParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
@@ -432,10 +517,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::CONTENT_SEARCH | protocol::methods::CONTENT_SEARCH_V1 => {
-            let params: protocol::ContentSearchParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::ContentSearchParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let mut all_results = Vec::new();
 
@@ -456,10 +548,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::SYMBOL_FIND | protocol::methods::SYMBOL_SEARCH => {
-            let params: protocol::SymbolFindParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::SymbolFindParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let mut all_symbols = Vec::new();
 
@@ -477,14 +576,24 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 }
             }
 
-            JsonRpcResponse::success(req.id, serde_json::to_value(all_symbols).unwrap_or(json!([])))
+            JsonRpcResponse::success(
+                req.id,
+                serde_json::to_value(all_symbols).unwrap_or(json!([])),
+            )
         }
 
         protocol::methods::PROJECT_ACTIVITY | protocol::methods::PROJECT_GET_ACTIVITY => {
-            let params: protocol::SnapshotActivityParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::SnapshotActivityParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let mut all_activity = Vec::new();
 
@@ -499,7 +608,11 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 if let Ok(history) = repo.db.get_global_history(params.limit) {
                     for sn in history {
                         let commit_message = sn.commit_hash.as_ref().and_then(|h| {
-                            repo.db.get_git_commit(h).ok().flatten().map(|(msg, _, _)| msg)
+                            repo.db
+                                .get_git_commit(h)
+                                .ok()
+                                .flatten()
+                                .map(|(msg, _, _)| msg)
                         });
                         all_activity.push(protocol::SnapshotInfo {
                             id: sn.id,
@@ -517,14 +630,24 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             all_activity.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
             all_activity.truncate(params.limit);
 
-            JsonRpcResponse::success(req.id, serde_json::to_value(all_activity).unwrap_or(json!([])))
+            JsonRpcResponse::success(
+                req.id,
+                serde_json::to_value(all_activity).unwrap_or(json!([])),
+            )
         }
 
         protocol::methods::PROJECT_MAP | protocol::methods::PROJECT_GET_MAP => {
-            let params: protocol::ProjectMapParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::ProjectMapParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             if let Some(repo_entry) = state.repos.get(&params.project_path) {
                 let repo = repo_entry.value();
@@ -540,17 +663,19 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     if let Ok(snaps) = repo.db.get_history(&f.path) {
                         if let Some(latest) = snaps.first() {
                             if let Ok(symbols) = repo.db.get_symbols_for_snapshot(latest.id) {
-                                symbols_map[&f.path] = json!(symbols
-                                    .into_iter()
-                                    .map(|sym| {
-                                        json!({
-                                            "name": sym.name,
-                                            "kind": sym.kind,
-                                            "start_line": sym.start_line,
-                                            "end_line": sym.end_line
+                                symbols_map[&f.path] = json!(
+                                    symbols
+                                        .into_iter()
+                                        .map(|sym| {
+                                            json!({
+                                                "name": sym.name,
+                                                "kind": sym.kind,
+                                                "start_line": sym.start_line,
+                                                "end_line": sym.end_line
+                                            })
                                         })
-                                    })
-                                    .collect::<Vec<_>>());
+                                        .collect::<Vec<_>>()
+                                );
                             }
                         }
                     }
@@ -562,13 +687,20 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::PROJECT_STATISTICS | protocol::methods::PROJECT_GET_STATISTICS => {
-            let params: protocol::ProjectStatisticsParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::ProjectStatisticsParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let mut target_repo_arc = None;
-            
+
             if let Some(ref path) = params.project_path {
                 target_repo_arc = state.repos.get(path).map(|r| r.value().clone());
             } else if state.repos.len() == 1 {
@@ -577,8 +709,15 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             if let Some(repo) = target_repo_arc {
                 let total_snapshots = repo.db.get_snapshot_count().unwrap_or(0);
-                let total_files = repo.db.get_recent_files(1000, None, None).unwrap_or_default().len();
-                let last_activity = repo.db.get_global_history(1).ok()
+                let total_files = repo
+                    .db
+                    .get_recent_files(1000, None, None)
+                    .unwrap_or_default()
+                    .len();
+                let last_activity = repo
+                    .db
+                    .get_global_history(1)
+                    .ok()
                     .and_then(|h| h.first().map(|sn| sn.timestamp.clone()))
                     .unwrap_or_default();
 
@@ -595,7 +734,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     top_branches: Vec::new(),
                     extensions: Vec::new(),
                 };
-                return JsonRpcResponse::success(req.id, serde_json::to_value(resp).unwrap_or(json!({})));
+                return JsonRpcResponse::success(
+                    req.id,
+                    serde_json::to_value(resp).unwrap_or(json!({})),
+                );
             }
             JsonRpcResponse::error(req.id, -32000, "No project selected or found".into())
         }
@@ -603,7 +745,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         protocol::methods::FILE_INFO | protocol::methods::FILE_GET_INFO => {
             let params: serde_json::Value = req.params.clone();
             let file_path = params["file_path"].as_str().unwrap_or("");
-            
+
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 if file_path.starts_with(&repo.project.path) {
@@ -625,16 +767,29 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::FILE_DIFF | protocol::methods::FILE_GET_DIFF => {
-            let params: protocol::FileDiffParams = match serde_json::from_value(req.params.clone()) {
+            let params: protocol::FileDiffParams = match serde_json::from_value(req.params.clone())
+            {
                 Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, -32602, format!("Invalid params: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32602,
+                        format!("Invalid params: {}", e),
+                    );
+                }
             };
 
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 if params.file_path.starts_with(&repo.project.path) {
-                    match repo.get_file_diff(&params.file_path, params.base_hash.as_deref(), &params.target_hash) {
-                        Ok(diff) => return JsonRpcResponse::success(req.id, json!({ "diff": diff })),
+                    match repo.get_file_diff(
+                        &params.file_path,
+                        params.base_hash.as_deref(),
+                        &params.target_hash,
+                    ) {
+                        Ok(diff) => {
+                            return JsonRpcResponse::success(req.id, json!({ "diff": diff }));
+                        }
                         Err(e) => return JsonRpcResponse::error(req.id, -32000, e.to_string()),
                     }
                 }
@@ -643,10 +798,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::SYMBOL_HISTORY | protocol::methods::SYMBOL_GET_HISTORY => {
-            let params: protocol::SymbolHistoryParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::SymbolHistoryParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            INVALID_PARAMS,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let mut history = Vec::new();
             for repo_entry in state.repos.iter() {
@@ -655,7 +817,11 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     if !h.is_empty() {
                         for (sn, sym) in h {
                             let commit_message = sn.commit_hash.as_ref().and_then(|h| {
-                                repo.db.get_git_commit(h).ok().flatten().map(|(msg, _, _)| msg)
+                                repo.db
+                                    .get_git_commit(h)
+                                    .ok()
+                                    .flatten()
+                                    .map(|(msg, _, _)| msg)
                             });
                             history.push(json!({
                                 "snapshot": protocol::SnapshotInfo {
@@ -682,10 +848,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
         }
 
         protocol::methods::SYMBOL_GET_SEMANTIC_HISTORY => {
-            let params: protocol::SemanticHistoryParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
-            };
+            let params: protocol::SemanticHistoryParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            INVALID_PARAMS,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let mut all_deltas = Vec::new();
             for repo_entry in state.repos.iter() {
@@ -694,23 +867,28 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     all_deltas.extend(deltas);
                 }
             }
-            
+
             JsonRpcResponse::success(req.id, json!({ "deltas": all_deltas }))
         }
 
         protocol::methods::GET_WATCHED_PROJECTS | protocol::methods::PROJECT_LIST => {
-            let projects: Vec<protocol::WatchedProject> = state.monitors.iter().map(|m| {
-                protocol::WatchedProject {
+            let projects: Vec<protocol::WatchedProject> = state
+                .monitors
+                .iter()
+                .map(|m| protocol::WatchedProject {
                     project_path: m.key().clone(),
                     watched_at: state.start_time.elapsed().as_secs().to_string(),
                     last_activity: state.start_time.elapsed().as_secs().to_string(),
                     file_count: 0,
                     snapshot_count: 0,
-                }
-            }).collect();
-            
+                })
+                .collect();
+
             let resp = protocol::GetWatchedProjectsResponse { projects };
-            JsonRpcResponse::success(req.id, serde_json::to_value(resp).unwrap_or(json!({"projects": []})))
+            JsonRpcResponse::success(
+                req.id,
+                serde_json::to_value(resp).unwrap_or(json!({"projects": []})),
+            )
         }
 
         protocol::methods::SHUTDOWN => {
@@ -726,10 +904,162 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             JsonRpcResponse::success(req.id, json!({"status": "shutting_down"}))
         }
 
-        _ => JsonRpcResponse::error(req.id, METHOD_NOT_FOUND, format!("Method not found: {}", req.method)),
+        // MCP Server methods
+        protocol::methods::MCP_START => {
+            use std::sync::atomic::Ordering;
+
+            // Check if already running
+            if state.mcp_running.load(Ordering::Relaxed) {
+                return JsonRpcResponse::error(req.id, -32000, "MCP server already running".into());
+            }
+
+            // Mark as enabled
+            state.mcp_enabled.store(true, Ordering::Relaxed);
+
+            // Find mnem-mcp binary
+            let mcp_bin = match find_mcp_binary() {
+                Ok(path) => path,
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32000,
+                        format!("MCP binary not found: {}", e),
+                    );
+                }
+            };
+
+            // Spawn mnem-mcp as child process
+            let child = match tokio::process::Command::new(&mcp_bin)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32000,
+                        format!("Failed to spawn MCP: {}", e),
+                    );
+                }
+            };
+
+            // Get PID
+            let pid = child.id().unwrap_or(0);
+
+            // Store child process
+            *state.mcp_child.write() = Some(child);
+            state.mcp_running.store(true, Ordering::Relaxed);
+
+            info!("MCP server started with PID {}", pid);
+            JsonRpcResponse::success(
+                req.id,
+                json!({
+                    "status": "started",
+                    "pid": pid,
+                    "transport": "stdio"
+                }),
+            )
+        }
+
+        protocol::methods::MCP_STOP => {
+            use std::sync::atomic::Ordering;
+
+            // Check if running
+            if !state.mcp_running.load(Ordering::Relaxed) {
+                return JsonRpcResponse::error(req.id, -32000, "MCP server not running".into());
+            }
+
+            // Try to gracefully kill first
+            if let Some(ref mut child) = state.mcp_child.write().take() {
+                let _ = child.kill().await;
+            }
+
+            state.mcp_running.store(false, Ordering::Relaxed);
+            state.mcp_enabled.store(false, Ordering::Relaxed);
+
+            info!("MCP server stopped");
+            JsonRpcResponse::success(
+                req.id,
+                json!({
+                    "status": "stopped"
+                }),
+            )
+        }
+
+        protocol::methods::MCP_STATUS => {
+            use std::sync::atomic::Ordering;
+
+            let running = state.mcp_running.load(Ordering::Relaxed);
+            let pid = state.mcp_child.read().as_ref().and_then(|c| c.id());
+
+            JsonRpcResponse::success(
+                req.id,
+                json!({
+                    "running": running,
+                    "pid": pid,
+                    "transport": "stdio"
+                }),
+            )
+        }
+
+        _ => JsonRpcResponse::error(
+            req.id,
+            METHOD_NOT_FOUND,
+            format!("Method not found: {}", req.method),
+        ),
     };
-    
+
     state.record_request(start_instant.elapsed().as_micros() as u64);
     response
 }
 
+/// Find the mnem-mcp binary. Searches:
+/// 1. Same directory as the current executable
+/// 2. PATH
+fn find_mcp_binary() -> Result<std::path::PathBuf, String> {
+    let mut bin_name = "mnem-mcp".to_string();
+    if cfg!(windows) {
+        bin_name.push_str(".exe");
+    }
+
+    // 1. Check next to the current binary
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            let sibling = parent.join(&bin_name);
+            if sibling.exists() {
+                return Ok(sibling);
+            }
+        }
+    }
+
+    // 2. Check PATH
+    #[cfg(unix)]
+    {
+        if let Ok(output) = std::process::Command::new("which").arg("mnem-mcp").output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Ok(std::path::PathBuf::from(path));
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(output) = std::process::Command::new("where").arg("mnem-mcp").output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if let Some(first_path) = path.lines().next() {
+                    return Ok(std::path::PathBuf::from(first_path));
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Cannot find {} binary. Build with `cargo build` or add to PATH.",
+        bin_name
+    ))
+}

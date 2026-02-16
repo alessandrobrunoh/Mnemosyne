@@ -29,6 +29,7 @@ uuid.workspace = true
 bytes.workspace = true
 lru.workspace = true
 ignore.workspace = true
+libc.workspace = true
 content_inspector.workspace = true
 memmap2 = "0.9"
 windows-sys = { version = "0.52", features = [

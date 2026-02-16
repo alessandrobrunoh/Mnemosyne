@@ -37,9 +37,9 @@ enum Commands {
         auto: bool,
     },
     #[command(about = "Stop daemon")]
-    Off,
+    Off {},
     #[command(about = "Show status")]
-    Status,
+    Status {},
     #[command(about = "Track project")]
     Track {
         #[arg(long)]
@@ -111,12 +111,18 @@ enum Commands {
         reset: bool,
     },
     #[command(about = "Uninstall mnem")]
-    Uninstall,
+    Uninstall {},
     #[command(about = "Check for updates and update")]
     Update {
         #[arg(long)]
         check_only: bool,
     },
+    #[command(about = "Start MCP server")]
+    McpStart {},
+    #[command(about = "Stop MCP server")]
+    McpStop {},
+    #[command(about = "Show MCP server status")]
+    McpStatus {},
 }
 
 fn main() -> Result<()> {
@@ -128,8 +134,8 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::On { auto }) => handlers::handle_on(auto),
-        Some(Commands::Off) => handlers::handle_off(),
-        Some(Commands::Status) => handlers::handle_status(),
+        Some(Commands::Off {}) => handlers::handle_off(),
+        Some(Commands::Status {}) => handlers::handle_status(),
         Some(Commands::Track { list, remove, id }) => handlers::handle_track(list, remove, id),
         Some(Commands::H {
             file,
@@ -164,8 +170,11 @@ fn main() -> Result<()> {
             aggressive,
         }) => handlers::handle_gc(keep, dry_run, aggressive),
         Some(Commands::Config { get, set, reset }) => handlers::handle_config(get, set, reset),
-        Some(Commands::Uninstall) => handlers::handle_uninstall(),
+        Some(Commands::Uninstall {}) => handlers::handle_uninstall(),
         Some(Commands::Update { check_only }) => handlers::handle_update(check_only),
+        Some(Commands::McpStart {}) => handlers::handle_mcp("start"),
+        Some(Commands::McpStop {}) => handlers::handle_mcp("stop"),
+        Some(Commands::McpStatus {}) => handlers::handle_mcp("status"),
         None => handlers::handle_status(),
     }
 }

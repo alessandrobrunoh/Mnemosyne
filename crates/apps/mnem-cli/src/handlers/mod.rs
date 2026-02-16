@@ -4,6 +4,7 @@ pub mod general;
 pub mod maintenance;
 pub mod workspace;
 
+pub use daemon::handle_mcp;
 pub use daemon::handle_off;
 pub use daemon::handle_on;
 pub use daemon::handle_status;

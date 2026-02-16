@@ -1,14 +1,15 @@
 use crate::Monitor;
 use dashmap::DashMap;
 use lru::LruCache;
+use mnem_core::Repository;
 use mnem_core::models::Snapshot;
 use mnem_core::protocol::{ClientCapabilities, ServerCapabilities};
-use mnem_core::Repository;
 use parking_lot::RwLock;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
+use tokio::sync::oneshot;
 
 const HISTORY_CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
@@ -51,6 +52,12 @@ pub struct DaemonState {
 
     /// Client capabilities (received during initialization)
     pub client_capabilities: RwLock<Option<ClientCapabilities>>,
+
+    /// MCP Server state
+    pub mcp_enabled: AtomicBool,
+    pub mcp_running: AtomicBool,
+    pub mcp_child: RwLock<Option<tokio::process::Child>>,
+    pub mcp_shutdown_tx: RwLock<Option<oneshot::Sender<()>>>,
 }
 
 impl DaemonState {
@@ -70,6 +77,10 @@ impl DaemonState {
             init_state: RwLock::new(InitializationState::Uninitialized),
             server_capabilities: RwLock::new(None),
             client_capabilities: RwLock::new(None),
+            mcp_enabled: AtomicBool::new(false),
+            mcp_running: AtomicBool::new(false),
+            mcp_child: RwLock::new(None),
+            mcp_shutdown_tx: RwLock::new(None),
         }
     }
 

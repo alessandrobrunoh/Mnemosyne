@@ -45,6 +45,7 @@ pub fn get_all() -> Vec<Box<dyn Command>> {
     commands.push(Box::new(daemon::StartCommand));
     commands.push(Box::new(daemon::StopCommand));
     commands.push(Box::new(daemon::StatusCommand));
+    commands.push(Box::new(daemon::McpCommand));
 
     // Workspace
     commands.push(Box::new(workspace::ListCommand));
