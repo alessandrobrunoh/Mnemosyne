@@ -1,0 +1,12 @@
+id = "zed-mcp"
+name = "Mnemosyne MCP"
+version = "0.1.0"
+schema_version = 1
+authors = ["Mnemosyne Team <team@mnemosyne.dev>"]
+description = "Model Context Protocol server for Mnemosyne local file history and semantic code navigation."
+repository = "https://github.com/alessandrobrunoh/mnemosyne"
+
+[lib]
+kind = "Rust"
+
+[context_servers.zed-mcp]

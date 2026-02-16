@@ -13,14 +13,22 @@
 
 ---
 
-## Why Mnemosyne?
+## The Problem We Solve
 
-| Problem | Mnemosyne Solution |
-|--------|-------------------|
-| Git only tracks commits | Captures every save |
-| Lost work between commits | Instant restore |
-| Can't remember what changed | Full history with diffs |
-| Large backup files | Deduplicated storage (10-100x smaller) |
+Every developer knows this pain:
+
+> **It's 11 PM. You've been refactoring for 3 hours. Suddenly—accident.** You press `Ctrl+Z` one too many times. The function you spent all evening building is gone. No git commit. No backup. Just... gone.
+
+**This is why Mnemosyne exists.**
+
+Git is great for commits—but what about everything in between? Every developer loses work between commits. Mnemosyne captures **every save**, so you can always go back.
+
+| Before Mnemosyne | After Mnemosyne |
+|-----------------|-----------------|
+| Ctrl+Z forever (and then too far) | Instant restore of **any** previous save |
+| "I should commit" → forget → regret | Auto-captures every save |
+| "When did I delete this?" | Full searchable history |
+| 50 versions = 50 full copies | 50 versions = ~1 copy (dedup) |
 
 ---
 
@@ -124,22 +132,11 @@ my-project/
 ```
 
 **Benefits:**
-- ✅ Portable — copy project to move history
-- ✅ Delete `.mnemosyne/` to remove all history  
-- ✅ Works offline — no cloud required
-- ✅ No global state pollution
+- Portable — copy project to move history
+- Delete `.mnemosyne/` to remove all history  
+- Works offline — no cloud required
+- No global state pollution
 
-### Zed-style Performance Engine
-
-Mnemosyne is built with high-performance engineering principles:
-
-- **redb Engine**: Pure-Rust, Copy-on-Write B-tree database (replaces SQLite).
-- **Zero-Copy**: Leverages `mmap` and `bytes::Bytes` for direct memory access without redundant buffers.
-- **Background Parsing**: Tree-sitter indexing happens in background threads, keeping response times **< 1ms**.
-- **String Interning**: Paths and symbols are stored once and referenced by IDs, reducing DB size by **30%**.
-- **Trigram Grep**: Search history 10x faster using Trigram-based Bloom filters to skip irrelevant chunks.
-- **Adaptive Debounce**: Intelligently scales snapshot frequency during heavy work (e.g., `npm install`).
-- **Chunk-only Storage**: Files are stored as unique semantic chunks and reassembled on-the-fly, saving **~50% disk space**.
 
 ### Semantic Understanding
 
@@ -188,14 +185,14 @@ global = ["*.log", "*.tmp"]
 
 ## Features
 
-- **Auto Snapshots** — every file save captured
-- **Branch Tracking** — history by Git branch
-- **Semantic Deltas** — understands code structure
-- **Instant Restore** — millisecond recovery
-- **Full-Text Search** — search across all history
-- **Deduplication** — 10-100x smaller than full copies
-- **Symbol History** — track function/class evolution
-- **IDE Integration** — open versions in your editor
+- **Auto Snapshots** — Every file save captured automatically
+- **Branch Tracking** — History organized by Git branch
+- **Semantic Deltas** — Understands code structure (functions, classes)
+- **Instant Restore** — Millisecond recovery to any point
+- **Full-Text Search** — Search across all history
+- **10-100x Storage** — Deduplication vs full copies
+- **Symbol History** — Track how functions and classes evolve
+- **IDE Integration** — Open versions in your editor
 
 ---
 
@@ -219,4 +216,4 @@ global = ["*.log", "*.tmp"]
 
 ## License
 
-MIT — See [LICENSE](LICENSE)
+APACHE 2.0 — See [LICENSE](LICENSE)

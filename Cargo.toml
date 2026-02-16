@@ -7,6 +7,8 @@ members = [
     "crates/apps/mnem-tui",
     "crates/apps/mnem-cli",
     "crates/extensions/mnem-mcp",
+    "crates/extensions/mnem-zed",
+    "crates/extensions/zed-mcp",
 ]
 resolver = "2"
 
