@@ -15,8 +15,21 @@ jobs:
       matrix:
         include:
           - os: windows-latest
+            platform: windows
+            arch: x86_64
+            ext: .exe
           - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            ext: ""
           - os: macos-latest
+            platform: macos
+            arch: x86_64
+            ext: ""
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            ext: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -27,12 +40,23 @@ jobs:
       - name: Build
         run: cargo build --release --package mnem-cli --package mnem-daemon
 
+      - name: Create archives (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd target/release
+          7z a ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
+
+      - name: Create archives (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd target/release
+          tar czf ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mnem-${{ matrix.os }}
-          path: |
-            target/release/mnem*
+          name: mnem-${{ matrix.platform }}-${{ matrix.arch }}
+          path: mnem-${{ matrix.platform }}-${{ matrix.arch }}.*
           retention-days: 7
 
   release:
