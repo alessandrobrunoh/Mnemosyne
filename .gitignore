@@ -1,6 +1,6 @@
 # Rust
 target/
-Cargo.lock
+# Cargo.lock - committed for reproducible builds (this is a binary, not a library)
 
 # IDEs
 .vscode/
@@ -42,3 +42,5 @@ criterion/
 # Binaries (built locally)
 bin/mnem
 bin/mnem-daemon
+
+.mnemosyne/
