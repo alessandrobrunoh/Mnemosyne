@@ -2,6 +2,22 @@
 
 # Mnemosyne
 
+## Development Notes
+
+To test the CLI after building:
+```bash
+# Build the binary
+cargo build --release -p mnem-cli
+
+# Run directly from target (avoids PATH issues)
+./target/release/mnem r ciao.txt --list
+
+# Or install to cargo bin
+cargo install --path crates/apps/mnem-cli
+mnem r ciao.txt --list
+```
+
+
 ### Local History for Developers
 
 [![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://www.rust-lang.org)

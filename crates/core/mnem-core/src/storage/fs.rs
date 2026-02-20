@@ -52,7 +52,7 @@ fn is_already_compressed(data: &[u8]) -> bool {
 
 #[derive(Clone)]
 pub struct CasStorage {
-    base_dir: PathBuf,
+    pub base_dir: PathBuf,
 }
 
 impl CasStorage {
@@ -224,11 +224,7 @@ impl CasStorage {
             object_path
         } else {
             let legacy = self.base_dir.join("objects").join(hash);
-            if legacy.exists() {
-                legacy
-            } else {
-                object_path
-            }
+            if legacy.exists() { legacy } else { object_path }
         };
 
         let raw = fs::read(&actual_path).map_err(|e| {

@@ -31,6 +31,17 @@ struct SnapshotData {
     git_branch_id: Option<u32>,
     session_id: Option<i64>,
     commit_hash: Option<String>,
+    #[serde(default)]
+    commit_message: Option<String>,
+}
+
+/// Helper function to safely deserialize SnapshotData, skipping old format or corrupted records
+fn deserialize_snapshot_data(value: &[u8]) -> Option<SnapshotData> {
+    let data: SnapshotData = bincode::deserialize(value).ok()?;
+    if data.file_path_id == 0 {
+        return None;
+    }
+    Some(data)
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -420,6 +431,7 @@ impl Database {
                 git_branch_id,
                 session_id,
                 commit_hash: None,
+                commit_message: None,
             };
             let bytes = bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
             table
@@ -481,9 +493,18 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            let path = self.lookup_string(data.file_path_id)?;
+            // Skip records that can't be parsed (old format or corrupted)
+            let Ok(data) = bincode::deserialize::<SnapshotData>(v.value()) else {
+                continue;
+            };
+            // Skip records with invalid file_path_id
+            if data.file_path_id == 0 {
+                continue;
+            }
+            let path = match self.lookup_string(data.file_path_id) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
             if path.contains(file_path) {
                 let branch = if let Some(bid) = data.git_branch_id {
                     Some(self.lookup_string(bid)?)
@@ -498,6 +519,7 @@ impl Database {
                     git_branch: branch,
                     session_id: data.session_id,
                     commit_hash: data.commit_hash,
+                    commit_message: data.commit_message,
                 });
             }
         }
@@ -519,9 +541,13 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            let path = self.lookup_string(data.file_path_id)?;
+            let Some(data) = deserialize_snapshot_data(v.value()) else {
+                continue;
+            };
+            let path = match self.lookup_string(data.file_path_id) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
             let branch = if let Some(bid) = data.git_branch_id {
                 Some(self.lookup_string(bid)?)
             } else {
@@ -535,6 +561,7 @@ impl Database {
                 git_branch: branch,
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
+                commit_message: data.commit_message,
             });
         }
         history.sort_by(|a, b| b.id.cmp(&a.id));
@@ -573,6 +600,7 @@ impl Database {
                     git_branch: branch,
                     session_id: data.session_id,
                     commit_hash: data.commit_hash,
+                    commit_message: data.commit_message,
                 });
             }
         }
@@ -763,6 +791,7 @@ impl Database {
                 git_branch: branch,
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
+                commit_message: data.commit_message,
             });
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -809,6 +838,7 @@ impl Database {
                 git_branch: branch,
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
+                commit_message: data.commit_message,
             });
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -829,9 +859,9 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            hashes.insert(data.content_hash);
+            if let Some(data) = deserialize_snapshot_data(v.value()) {
+                hashes.insert(data.content_hash);
+            }
         }
         Ok(hashes)
     }
@@ -1014,6 +1044,7 @@ impl Database {
                 git_branch: branch,
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
+                commit_message: data.commit_message,
             }))
         } else {
             Ok(None)
@@ -1529,6 +1560,7 @@ impl Database {
                         git_branch: branch,
                         session_id: snap_data.session_id,
                         commit_hash: snap_data.commit_hash,
+                        commit_message: snap_data.commit_message,
                     };
                     let name = self.lookup_string(sym_data.name_id)?;
                     let kind = self.lookup_string(sym_data.kind_id)?;

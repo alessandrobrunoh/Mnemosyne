@@ -219,5 +219,5 @@ mod windows_impl {
 
 pub fn get_socket_path() -> PathBuf {
     let home = dirs::home_dir().expect("Home directory not found");
-    home.join(".mnemosyne").join("daemon.sock")
+    home.join(".mnemosyne").join("mnemd.sock")
 }

@@ -37,25 +37,14 @@ pub fn handle_h(
 ) -> Result<()> {
     let layout = Layout::new();
 
-    // Determine the project path: use file's directory if provided, otherwise cwd
+    // Always use cwd for project detection, not file's directory
+    // The .mnemosyne folder exists at project root, not in subdirectories
     let cwd = std::env::current_dir()?;
-    let project_path = if let Some(ref f) = file {
-        let file_path = std::path::Path::new(f);
-        let resolved_path = if file_path.is_relative() {
-            cwd.join(file_path)
-        } else {
-            file_path.to_path_buf()
-        };
-        resolved_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or(cwd)
-    } else {
-        cwd
-    };
+    let project_path = cwd;
 
     // Check if this project is tracked
     let tracked_file = project_path.join(".mnemosyne").join("tracked");
+
     if !tracked_file.exists() {
         layout.header_dashboard("PROJECT NOT TRACKED");
         layout.section_branch("pr", "Project Path");
@@ -152,6 +141,7 @@ fn handle_file_history_direct(
     let base_dir = get_base_dir()?;
     let repo = Repository::open(base_dir, project_path.to_path_buf())?;
 
+    // Convert relative path to absolute by joining with project_path
     let clean_path = if f.starts_with(".\\") {
         &f[2..]
     } else if f.starts_with("./") {
@@ -160,7 +150,14 @@ fn handle_file_history_direct(
         f
     };
 
-    let history_db = repo.get_history(clean_path)?;
+    // Use absolute path for database lookup (how files are stored internally)
+    let absolute_path = if std::path::Path::new(clean_path).is_absolute() {
+        clean_path.to_string()
+    } else {
+        project_path.join(clean_path).to_string_lossy().to_string()
+    };
+
+    let history_db = repo.get_history(&absolute_path)?;
 
     // Convert to SnapshotInfo format
     let history: Vec<SnapshotInfo> = history_db

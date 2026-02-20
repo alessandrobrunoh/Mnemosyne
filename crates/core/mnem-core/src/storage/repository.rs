@@ -192,15 +192,16 @@ temp/
     }
 
     /// Calculate the size of the project's history in bytes.
-    /// Sum of all unique chunks linked to this project + redb file size.
+    /// Sum of all CAS files + redb file size.
     pub fn get_project_size(&self) -> AppResult<u64> {
-        let mut total = 0;
+        let mut total = 0u64;
 
-        // 1. Get size of all unique chunks
-        let hashes = self.db.get_all_content_hashes()?;
-        for hash in hashes {
-            if let Ok(size) = self.fs.get_size(&hash) {
-                total += size;
+        // 1. Get size of all CAS files (content-addressable storage)
+        if let Ok(entries) = std::fs::read_dir(&self.fs.base_dir) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    total += metadata.len();
+                }
             }
         }
 
@@ -383,14 +384,18 @@ temp/
             let enable_compression = self.is_compression_enabled();
             self.fs.write(&chunk.data, enable_compression)?; // Filesystem CAS (Only chunks)
             self.db.insert_chunk(&chunk_hash, "raw")?; // DB metadata
-            
+
             // Improvement: Trigram indexing for Grep (Background)
             let db_c = self.db.clone();
             let hash_c = chunk_hash.clone();
             let data_c = chunk.data.clone();
-            tokio::spawn(async move {
-                let _ = db_c.update_chunk_trigrams(&hash_c, &data_c);
-            });
+
+            // Only spawn if we're in a Tokio runtime context
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = db_c.update_chunk_trigrams(&hash_c, &data_c);
+                });
+            }
 
             chunks_info.push((chunk_hash, chunk.offset, chunk.length));
         }
@@ -401,92 +406,107 @@ temp/
         }
 
         // 5. Semantic Indexing (Background)
-        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
         let db = self.db.clone();
         let path_str = path_str.clone();
 
-        tokio::spawn(async move {
-            use crate::semantic::diff::SemanticDiffer;
-            if let Ok(mut parser) = SemanticParser::new() {
-                if let Ok((symbols, references)) =
-                    parser.parse_semantic_data(&content, &ext, snapshot_id, Some(&path_str))
-                {
-                    let mut should_save_symbols = true;
-                    let mut prev_snapshot_id = None;
-                    let mut prev_symbols = Vec::new();
+        // Only spawn if we're in a Tokio runtime context
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                use crate::semantic::diff::SemanticDiffer;
+                if let Ok(mut parser) = SemanticParser::new() {
+                    if let Ok((symbols, references)) =
+                        parser.parse_semantic_data(&content, &ext, snapshot_id, Some(&path_str))
+                    {
+                        let mut should_save_symbols = true;
+                        let mut prev_snapshot_id = None;
+                        let mut prev_symbols = Vec::new();
 
-                    if let Some((pid, psyms)) = previous_snapshot_data {
-                        prev_snapshot_id = Some(pid);
-                        prev_symbols = psyms;
+                        if let Some((pid, psyms)) = previous_snapshot_data {
+                            prev_snapshot_id = Some(pid);
+                            prev_symbols = psyms;
 
-                        // Calculate a "Structural Signature" of the file
-                        let current_sig: String = symbols
-                            .iter()
-                            .map(|s| &s.structural_hash)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("");
-                        let last_sig: String = prev_symbols
-                            .iter()
-                            .map(|s| &s.structural_hash)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("");
+                            // Calculate a "Structural Signature" of the file
+                            let current_sig: String = symbols
+                                .iter()
+                                .map(|s| &s.structural_hash)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("");
+                            let last_sig: String = prev_symbols
+                                .iter()
+                                .map(|s| &s.structural_hash)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("");
 
-                        if current_sig == last_sig && !current_sig.is_empty() {
-                            should_save_symbols = false;
-                        }
-                    }
-
-                    let mut deltas_to_save = Vec::new();
-                    // Compute and store Semantic Deltas
-                    if prev_snapshot_id.is_some() || !symbols.is_empty() {
-                        let deltas = SemanticDiffer::compare(
-                            &prev_symbols,
-                            &symbols,
-                            prev_snapshot_id,
-                            snapshot_id,
-                        );
-                        deltas_to_save = deltas;
-                    }
-
-                    let mut symbols_to_save = Vec::new();
-                    if should_save_symbols {
-                        // We cannot easily use a stack with parent_id if we want to batch perfectly,
-                        // but we can compute the tree structure here and then batch the list.
-                        // For simplicity, let's just collect them.
-                        let mut parent_stack: Vec<(usize, i64)> = Vec::new();
-
-                        for mut symbol in symbols {
-                            while let Some((parent_end, _)) = parent_stack.last() {
-                                if symbol.start_byte >= *parent_end { parent_stack.pop(); } else { break; }
-                            }
-                            if let Some((_, parent_db_id)) = parent_stack.last() {
-                                symbol.parent_id = Some(*parent_db_id);
-                            }
-                            if let Some((chunk_hash, _, _)) = chunks_info.iter().find(|(_, offset, len)| {
-                                symbol.start_byte >= *offset && symbol.start_byte < (*offset + *len)
-                            }) {
-                                symbol.chunk_hash = chunk_hash.clone();
-                            }
-                            
-                            // To get the parent_id correctly, we still need to insert them sequentially 
-                            // or compute the IDs locally. redb uses u64 IDs we generate.
-                            // Let's keep the sequential insert for symbols to maintain parent_id integrity,
-                            // but batch the rest.
-                            if let Ok(db_id) = db.insert_symbol(&symbol) {
-                                parent_stack.push((symbol.end_byte, db_id));
-                                symbol.id = db_id;
-                                symbols_to_save.push(symbol);
+                            if current_sig == last_sig && !current_sig.is_empty() {
+                                should_save_symbols = false;
                             }
                         }
-                    }
 
-                    // Use the new batch method for references and deltas (Symbols are already saved for parent_id)
-                    let _ = db.batch_insert_semantic_data(Vec::new(), deltas_to_save, references);
+                        let mut deltas_to_save = Vec::new();
+                        // Compute and store Semantic Deltas
+                        if prev_snapshot_id.is_some() || !symbols.is_empty() {
+                            let deltas = SemanticDiffer::compare(
+                                &prev_symbols,
+                                &symbols,
+                                prev_snapshot_id,
+                                snapshot_id,
+                            );
+                            deltas_to_save = deltas;
+                        }
+
+                        let mut symbols_to_save = Vec::new();
+                        if should_save_symbols {
+                            // We cannot easily use a stack with parent_id if we want to batch perfectly,
+                            // but we can compute the tree structure here and then batch the list.
+                            // For simplicity, let's just collect them.
+                            let mut parent_stack: Vec<(usize, i64)> = Vec::new();
+
+                            for mut symbol in symbols {
+                                while let Some((parent_end, _)) = parent_stack.last() {
+                                    if symbol.start_byte >= *parent_end {
+                                        parent_stack.pop();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                if let Some((_, parent_db_id)) = parent_stack.last() {
+                                    symbol.parent_id = Some(*parent_db_id);
+                                }
+                                if let Some((chunk_hash, _, _)) =
+                                    chunks_info.iter().find(|(_, offset, len)| {
+                                        symbol.start_byte >= *offset
+                                            && symbol.start_byte < (*offset + *len)
+                                    })
+                                {
+                                    symbol.chunk_hash = chunk_hash.clone();
+                                }
+
+                                // To get the parent_id correctly, we still need to insert them sequentially
+                                // or compute the IDs locally. redb uses u64 IDs we generate.
+                                // Let's keep the sequential insert for symbols to maintain parent_id integrity,
+                                // but batch the rest.
+                                if let Ok(db_id) = db.insert_symbol(&symbol) {
+                                    parent_stack.push((symbol.end_byte, db_id));
+                                    symbol.id = db_id;
+                                    symbols_to_save.push(symbol);
+                                }
+                            }
+                        }
+
+                        // Use the new batch method for references and deltas (Symbols are already saved for parent_id)
+                        let _ =
+                            db.batch_insert_semantic_data(Vec::new(), deltas_to_save, references);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         Ok(full_hash)
     }

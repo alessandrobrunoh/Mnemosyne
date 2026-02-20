@@ -4,7 +4,7 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc;
 
 pub struct Monitor {
@@ -19,11 +19,23 @@ struct FileEvent {
 
 impl Monitor {
     pub fn new(root_path: PathBuf, repo: Arc<Repository>) -> Self {
-        Self { root_path, repo, state: None }
+        Self {
+            root_path,
+            repo,
+            state: None,
+        }
     }
 
-    pub fn with_state(root_path: PathBuf, repo: Arc<Repository>, state: Arc<crate::state::DaemonState>) -> Self {
-        Self { root_path, repo, state: Some(state) }
+    pub fn with_state(
+        root_path: PathBuf,
+        repo: Arc<Repository>,
+        state: Arc<crate::state::DaemonState>,
+    ) -> Self {
+        Self {
+            root_path,
+            repo,
+            state: Some(state),
+        }
     }
 
     pub async fn start(&self) -> AppResult<()> {
@@ -53,14 +65,21 @@ impl Monitor {
             }
         });
 
-        // Event Loop: Adaptive Debouncing
-        let mut debounced_paths: std::collections::HashMap<PathBuf, (Instant, u32)> = std::collections::HashMap::new();
+        // Event Loop: Adaptive Debouncing + Periodic Polling
+        let mut debounced_paths: std::collections::HashMap<PathBuf, (Instant, u32)> =
+            std::collections::HashMap::new();
         let mut interval = tokio::time::interval(Duration::from_millis(500));
+        let mut polling_interval = tokio::time::interval(Duration::from_secs(30));
+        let mut new_files_interval = tokio::time::interval(Duration::from_secs(60));
 
         let mnemignore = self.get_mnemignore()?;
-        let config_max_size = self.repo.config.lock()
+        let config_max_size = self
+            .repo
+            .config
+            .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .config.max_file_size_mb;
+            .config
+            .max_file_size_mb;
         let max_file_size = config_max_size * 1024 * 1024;
 
         log::info!("Monitor loop started for {:?}", self.root_path);
@@ -70,7 +89,7 @@ impl Monitor {
                     if !self.is_ignored(&event.path, Some(&mnemignore)) {
                         let now = Instant::now();
                         let entry = debounced_paths.entry(event.path).or_insert((now, 0));
-                        
+
                         // Adaptive delay: increase delay if file changes too frequently
                         entry.1 += 1;
                         let delay_secs = match entry.1 {
@@ -102,6 +121,62 @@ impl Monitor {
                         to_save.par_iter().for_each(|path| {
                             self.process_file(path, max_file_size);
                         });
+                    }
+                }
+                _ = new_files_interval.tick() => {
+                    // Periodic full scan to detect NEW files (not just modified existing ones)
+                    log::info!("Polling: scanning for new files in {:?}", self.root_path);
+                    use ignore::WalkBuilder;
+                    let walker = WalkBuilder::new(&self.root_path)
+                        .hidden(true)
+                        .git_ignore(false)
+                        .build();
+
+                    for entry in walker.filter_map(|r| r.ok()) {
+                        let path = entry.path();
+                        if path.is_file() && !self.is_ignored(path, Some(&mnemignore)) {
+                            // Check if this file has any snapshots at all
+                            if let Ok(history) = self.repo.get_history(&path.to_string_lossy()) {
+                                if history.is_empty() {
+                                    // This is a new file, save it
+                                    log::info!("Polling: found new file {:?}", path);
+                                    self.process_file(path, max_file_size);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ = polling_interval.tick() => {
+                    // Periodic polling to catch missed notify events (backup mechanism)
+                    if let Ok(recent_snapshots) = self.repo.get_recent_activity(100) {
+                        let mut missed_changes = Vec::new();
+
+                        for snapshot in recent_snapshots {
+                            let file_path = PathBuf::from(&snapshot.file_path);
+                            if !self.is_ignored(&file_path, Some(&mnemignore)) {
+                                if let Ok(metadata) = file_path.metadata() {
+                                    if let Ok(modified) = metadata.modified() {
+                                        // Parse snapshot time and check if file was modified more recently
+                                        if let Ok(snapshot_dt) = chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp) {
+                                            let snapshot_time: SystemTime = snapshot_dt.into();
+                                            if let Ok(modified_dt) = modified.duration_since(snapshot_time) {
+                                                // File was modified after last snapshot
+                                                if modified_dt.as_secs() > 0 {
+                                                    missed_changes.push(file_path);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !missed_changes.is_empty() {
+                            log::info!("Polling detected {} missed changes", missed_changes.len());
+                            for path in missed_changes {
+                                self.process_file(&path, max_file_size);
+                            }
+                        }
                     }
                 }
             }
@@ -161,7 +236,6 @@ impl Monitor {
         } else {
             log::info!("Skipping binary file: {:?}", path);
         }
-
     }
 
     /// Parallel initial scan using rayon for large codebases (audit 2.4).

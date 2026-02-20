@@ -106,16 +106,9 @@ impl DaemonState {
             .fetch_add(duration_us, Ordering::Relaxed);
     }
 
-    /// Calculate total storage size from all watched projects
+    /// Calculate total storage size from ~/.mnemosyne directory
     pub fn calculate_total_size(&self) -> u64 {
-        let mut total: u64 = 0;
-
-        for repo in self.repos.iter() {
-            if let Ok(size) = repo.get_project_size() {
-                total += size;
-            }
-        }
-
+        let total = Repository::get_total_storage_size().unwrap_or(0);
         self.cached_total_size.store(total, Ordering::Relaxed);
         total
     }

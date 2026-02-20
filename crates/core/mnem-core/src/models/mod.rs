@@ -12,6 +12,7 @@ pub struct Snapshot {
     pub git_branch: Option<String>,
     pub session_id: Option<i64>,
     pub commit_hash: Option<String>,
+    pub commit_message: Option<String>,
 }
 
 pub struct FileEntry {

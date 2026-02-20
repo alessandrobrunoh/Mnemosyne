@@ -1,3 +1,4 @@
+// VERSION: v2-FIX-2024 - Testing binary replacement
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -77,7 +78,7 @@ enum Commands {
         checkpoint: Option<String>,
         #[arg(long)]
         branch: Option<String>,
-        #[arg(long, short)]
+        #[arg(long)]
         limit: Option<usize>,
     },
     #[command(about = "Search history")]
@@ -126,7 +127,9 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    std::fs::write("/tmp/mnem_debug.log", "DEBUG: main() called\n").ok();
     let cli = Cli::parse();
+    std::fs::write("/tmp/mnem_debug.log", "DEBUG: CLI parsed\n").ok();
 
     if let Some(project_path) = cli.project {
         std::env::set_current_dir(project_path)?;
