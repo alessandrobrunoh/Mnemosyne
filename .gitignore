@@ -38,3 +38,7 @@ criterion/
 
 # Agents Temp files
 .agents/
+
+# Binaries (built locally)
+bin/mnem
+bin/mnem-daemon
