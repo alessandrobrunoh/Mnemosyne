@@ -25,6 +25,9 @@ const UNRESTRICTED_METHODS: &[&str] = &[
 pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> JsonRpcResponse {
     let start_instant = std::time::Instant::now();
 
+    // Log all incoming requests for debugging
+    info!("Received request: method={}, id={:?}", req.method, req.id);
+
     // Normalize method name for backward compatibility
     let normalized_method = protocol::normalize_method_name(&req.method);
 
@@ -106,6 +109,8 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 protocol::methods::SNAPSHOT_CREATE.to_string(),
                 protocol::methods::SNAPSHOT_LIST.to_string(),
                 protocol::methods::SNAPSHOT_GET.to_string(),
+                protocol::methods::SNAPSHOT_RESTORE_V1.to_string(),
+                protocol::methods::SNAPSHOT_RESTORE_SYMBOL_V1.to_string(),
                 protocol::methods::SYMBOL_GET_HISTORY.to_string(),
                 protocol::methods::SYMBOL_SEARCH.to_string(),
                 protocol::methods::CONTENT_SEARCH_V1.to_string(),
@@ -407,12 +412,25 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 };
 
             let file_path = std::path::Path::new(&params.file_path);
+            info!("SNAPSHOT_LIST: Requested file_path: {:?}", params.file_path);
+            info!(
+                "SNAPSHOT_LIST: Iterating through {} repos",
+                state.repos.iter().count()
+            );
+
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
+                info!(
+                    "SNAPSHOT_LIST: Checking if {:?} starts with {:?}",
+                    file_path, project_path
+                );
+
                 if file_path.starts_with(project_path) {
-                    // Try cache first
+                    info!("SNAPSHOT_LIST: Found matching project: {:?}", project_path);
+                    info!("SNAPSHOT_LIST: Cache hit for {:?}", params.file_path);
                     if let Some(cached) = state.get_cached_history(&params.file_path) {
+                        info!("SNAPSHOT_LIST: Found {} cached versions", cached.len());
                         let infos: Vec<protocol::SnapshotInfo> = cached
                             .into_iter()
                             .filter(|sn| {
@@ -448,8 +466,13 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     }
 
                     // Cache miss - fetch from database
+                    info!("SNAPSHOT_LIST: Cache miss, fetching from database");
                     match repo.get_history(&params.file_path) {
                         Ok(history) => {
+                            info!(
+                                "SNAPSHOT_LIST: Found {} versions in database",
+                                history.len()
+                            );
                             // Cache the result
                             state.cache_history(params.file_path.clone(), history.clone());
 
@@ -486,10 +509,17 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                 serde_json::to_value(infos).unwrap_or(json!([])),
                             );
                         }
-                        Err(e) => return JsonRpcResponse::error(req.id, -32000, e.to_string()),
+                        Err(e) => {
+                            error!("SNAPSHOT_LIST: Failed to get history: {}", e);
+                            return JsonRpcResponse::error(req.id, -32000, e.to_string());
+                        }
                     }
                 }
             }
+            error!(
+                "SNAPSHOT_LIST: No repository owns this file: {:?}",
+                params.file_path
+            );
             JsonRpcResponse::error(req.id, -32000, "No watched project owns this file".into())
         }
 
@@ -517,6 +547,88 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 }
             }
             JsonRpcResponse::error(req.id, -32000, "Content not found".into())
+        }
+
+        protocol::methods::SNAPSHOT_RESTORE | protocol::methods::SNAPSHOT_RESTORE_V1 => {
+            let params: protocol::SnapshotRestoreParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            INVALID_PARAMS,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
+
+            let file_path = std::path::Path::new(&params.target_path);
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                let project_path = std::path::Path::new(&repo.project.path);
+
+                if file_path.starts_with(project_path) {
+                    let clean_path = params
+                        .target_path
+                        .strip_prefix(&repo.project.path)
+                        .unwrap_or(&params.target_path)
+                        .trim_start_matches('/');
+                    match repo.restore_file(&params.content_hash, clean_path) {
+                        Ok(_) => {
+                            info!("Restored {} to {}", clean_path, &params.content_hash[..8]);
+                            return JsonRpcResponse::success(
+                                req.id,
+                                json!({ "status": "restored", "hash": params.content_hash }),
+                            );
+                        }
+                        Err(e) => {
+                            return JsonRpcResponse::error(req.id, -32000, e.to_string());
+                        }
+                    }
+                }
+            }
+            JsonRpcResponse::error(req.id, -32000, "No watched project owns this file".into())
+        }
+
+        protocol::methods::SNAPSHOT_RESTORE_SYMBOL | protocol::methods::SNAPSHOT_RESTORE_SYMBOL_V1 => {
+            let params: protocol::SnapshotRestoreSymbolParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            INVALID_PARAMS,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
+
+            let file_path = std::path::Path::new(&params.target_path);
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                let project_path = std::path::Path::new(&repo.project.path);
+
+                if file_path.starts_with(project_path) {
+                    let clean_path = params
+                        .target_path
+                        .strip_prefix(&repo.project.path)
+                        .unwrap_or(&params.target_path)
+                        .trim_start_matches('/');
+                    match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name) {
+                        Ok(_) => {
+                            info!("Restored symbol '{}' in {} to {}", params.symbol_name, clean_path, &params.content_hash[..8]);
+                            return JsonRpcResponse::success(
+                                req.id,
+                                json!({ "status": "restored", "hash": params.content_hash }),
+                            );
+                        }
+                        Err(e) => {
+                            return JsonRpcResponse::error(req.id, -32000, e.to_string());
+                        }
+                    }
+                }
+            }
+            JsonRpcResponse::error(req.id, -32000, "No watched project owns this file".into())
         }
 
         protocol::methods::CONTENT_SEARCH | protocol::methods::CONTENT_SEARCH_V1 => {
