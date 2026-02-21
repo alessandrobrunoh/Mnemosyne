@@ -32,29 +32,14 @@ jobs:
             arch: x86_64
             ext: ""
 
-          # macOS ARM64 (Apple Silicon)
-          - os: macos-latest
-            platform: macos
-            arch: arm64
-            ext: ""
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.85.0
 
-      - name: Install ARM64 target
-        if: matrix.arch == 'arm64'
-        run: rustup target add aarch64-apple-darwin
-
-      - name: Build (native)
-        if: matrix.arch != 'arm64'
+      - name: Build
         run: cargo build --release --package mnem-cli --package mnem-daemon
-
-      - name: Build (ARM64)
-        if: matrix.arch == 'arm64'
-        run: cargo build --release --package mnem-cli --package mnem-daemon --target aarch64-apple-darwin
 
       - name: Create archive
         shell: bash
@@ -62,10 +47,6 @@ jobs:
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cd target/release
             7z a ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
-            cd ../..
-          elif [ "${{ matrix.arch }}" = "arm64" ]; then
-            cd target/aarch64-apple-darwin/release
-            tar czf ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
             cd ../..
           else
             cd target/release
