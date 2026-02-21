@@ -19,25 +19,28 @@ jobs:
             platform: windows
             arch: x86_64
             ext: .exe
+            target: ""
 
           # Linux x86_64
           - os: ubuntu-latest
             platform: linux
             arch: x86_64
             ext: ""
+            target: ""
 
           # macOS x86_64 (Intel)
           - os: macos-latest
             platform: macos
             arch: x86_64
             ext: ""
+            target: ""
 
-          # macOS ARM64 (Apple Silicon) - cross-compile using rust target
+          # macOS ARM64 (Apple Silicon)
           - os: macos-latest
             platform: macos
             arch: arm64
             ext: ""
-            target: aarch64-apple-darwin
+            target: "aarch64-apple-darwin"
 
     steps:
       - uses: actions/checkout@v4
@@ -45,32 +48,33 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.85.0
         with:
-          targets: ${{ matrix.target || '' }}
+          targets: ${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64-apple-darwin' || '' }}
 
       - name: Build (native)
         if: matrix.target == ''
         run: cargo build --release --package mnem-cli --package mnem-daemon
 
       - name: Build (cross-compile ARM64)
-        if: matrix.target != ''
-        run: cargo build --release --package mnem-cli --package mnem-daemon --target ${{ matrix.target }}
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo build --release --package mnem-cli --package mnem-daemon --target aarch64-apple-darwin
 
       - name: Create archive (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $releaseDir = if ($env:TARGET) { "target\$env:TARGET\release" } else { "target\release" }
-          cd $releaseDir
+          cd target\release
           7z a ..\..\..\..\mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
 
-      - name: Create archive (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Create archive (Unix - native)
+        if: matrix.os != 'windows-latest' && matrix.target == ''
         run: |
-          releaseDir="target/${{ matrix.target }}release"
-          if [ -z "${{ matrix.target }}" ]; then
-            releaseDir="target/release"
-          fi
-          cd "$releaseDir"
+          cd target/release
+          tar czf ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+
+      - name: Create archive (Unix - cross-compile)
+        if: matrix.os != 'windows-latest' && matrix.target != ''
+        run: |
+          cd target/aarch64-apple-darwin/release
           tar czf ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
 
       - name: Upload artifact
