@@ -19,43 +19,41 @@ jobs:
             platform: windows
             arch: x86_64
             ext: .exe
-            target: ""
 
           # Linux x86_64
           - os: ubuntu-latest
             platform: linux
             arch: x86_64
             ext: ""
-            target: ""
 
           # macOS x86_64 (Intel)
           - os: macos-latest
             platform: macos
             arch: x86_64
             ext: ""
-            target: ""
 
           # macOS ARM64 (Apple Silicon)
           - os: macos-latest
             platform: macos
             arch: arm64
             ext: ""
-            target: "aarch64-apple-darwin"
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.85.0
-        with:
-          targets: ${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64-apple-darwin' || '' }}
+
+      - name: Install ARM64 target
+        if: matrix.arch == 'arm64'
+        run: rustup target add aarch64-apple-darwin
 
       - name: Build (native)
-        if: matrix.target == ''
+        if: matrix.arch != 'arm64'
         run: cargo build --release --package mnem-cli --package mnem-daemon
 
-      - name: Build (cross-compile ARM64)
-        if: matrix.target == 'aarch64-apple-darwin'
+      - name: Build (ARM64 cross-compile)
+        if: matrix.arch == 'arm64'
         run: cargo build --release --package mnem-cli --package mnem-daemon --target aarch64-apple-darwin
 
       - name: Create archive (Windows)
@@ -66,16 +64,19 @@ jobs:
           7z a ..\..\..\..\mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
 
       - name: Create archive (Unix - native)
-        if: matrix.os != 'windows-latest' && matrix.target == ''
+        if: matrix.os != 'windows-latest' && matrix.arch != 'arm64'
         run: |
           cd target/release
           tar czf ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
 
-      - name: Create archive (Unix - cross-compile)
-        if: matrix.os != 'windows-latest' && matrix.target != ''
+      - name: Create archive (Unix - ARM64)
+        if: matrix.os != 'windows-latest' && matrix.arch == 'arm64'
         run: |
           cd target/aarch64-apple-darwin/release
           tar czf ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+
+      - name: List files
+        run: ls -la *.tar.gz *.zip 2>/dev/null || echo "No archives found"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
