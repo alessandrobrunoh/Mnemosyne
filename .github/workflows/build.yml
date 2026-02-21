@@ -26,10 +26,6 @@ jobs:
             platform: macos
             arch: x86_64
             ext: ""
-          - os: macos-latest
-            platform: macos
-            arch: arm64
-            ext: ""
 
     steps:
       - uses: actions/checkout@v4
