@@ -52,34 +52,27 @@ jobs:
         if: matrix.arch != 'arm64'
         run: cargo build --release --package mnem-cli --package mnem-daemon
 
-      - name: Build (ARM64 cross-compile)
+      - name: Build (ARM64)
         if: matrix.arch == 'arm64'
         run: cargo build --release --package mnem-cli --package mnem-daemon --target aarch64-apple-darwin
 
-      - name: Create archive (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
+      - name: Create archive
+        shell: bash
         run: |
-          cd target\release
-          7z a ..\..\..\..\mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
-          cd ..\..\..
-          Get-ChildItem mnem-*.zip
-
-      - name: Create archive (Unix - native)
-        if: matrix.os != 'windows-latest' && matrix.arch != 'arm64'
-        run: |
-          cd target/release
-          tar czf $GITHUB_WORKSPACE/mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
-          cd $GITHUB_WORKSPACE
-          ls -la mnem-*.tar.gz
-
-      - name: Create archive (Unix - ARM64)
-        if: matrix.os != 'windows-latest' && matrix.arch == 'arm64'
-        run: |
-          cd target/aarch64-apple-darwin/release
-          tar czf $GITHUB_WORKSPACE/mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
-          cd $GITHUB_WORKSPACE
-          ls -la mnem-*.tar.gz
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cd target/release
+            7z a ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
+            cd ../..
+          elif [ "${{ matrix.arch }}" = "arm64" ]; then
+            cd target/aarch64-apple-darwin/release
+            tar czf ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+            cd ../..
+          else
+            cd target/release
+            tar czf ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+            cd ../..
+          fi
+          ls -la mnem-*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
