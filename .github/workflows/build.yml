@@ -59,11 +59,11 @@ jobs:
             cd ../..
           elif [ "${{ matrix.arch }}" = "arm64" ]; then
             cd target/aarch64-apple-darwin/release
-            tar czf ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+            zip -r ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem mnem-daemon
             cd ../../..
           else
             cd target/release
-            tar czf ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz mnem mnem-daemon
+            zip -r ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem mnem-daemon
             cd ../..
           fi
           ls -la mnem-*
@@ -86,8 +86,26 @@ jobs:
         with:
           path: artifacts
 
+      - name: Extract artifacts and prepare binaries
+        run: |
+          mkdir -p release
+
+          # Find and extract all artifact ZIPs
+          for artifact in artifacts/mnem-*/*.zip; do
+            if [ -f "$artifact" ]; then
+              echo "Extracting: $artifact"
+              unzip -q "$artifact" -d release/
+            fi
+          done
+
+          # All platforms now use ZIP format
+
+          # List what we have
+          echo "Files prepared for release:"
+          ls -lh release/
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*
+          files: release/*
           draft: false
