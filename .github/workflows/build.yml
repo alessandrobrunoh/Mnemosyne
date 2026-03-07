@@ -90,15 +90,18 @@ jobs:
         run: |
           mkdir -p release
 
-          # Find and extract all artifact ZIPs
-          for artifact in artifacts/mnem-*/*.zip; do
-            if [ -f "$artifact" ]; then
-              echo "Extracting: $artifact"
-              unzip -q "$artifact" -d release/
-            fi
+          # Find all ZIP files recursively in artifacts directory
+          find artifacts -name "*.zip" -type f | while read zipfile; do
+            echo "Found artifact: $zipfile"
+            # Extract to release directory
+            unzip -q "$zipfile" -d release/
           done
 
-          # All platforms now use ZIP format
+          # Move binaries from subdirectories to release root
+          find release -mindepth 2 -type f -exec mv {} release/ \;
+
+          # Remove empty subdirectories
+          find release -mindepth 1 -type d -delete 2>/dev/null || true
 
           # List what we have
           echo "Files prepared for release:"
