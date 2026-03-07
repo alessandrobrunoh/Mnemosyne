@@ -88,19 +88,29 @@ jobs:
       - name: Extract artifacts and prepare binaries
         run: |
           mkdir -p release
+          mkdir -p temp_extract
 
-          # Find all ZIP files recursively in artifacts directory
-          find artifacts -name "*.zip" -type f | while read zipfile; do
-            echo "Found artifact: $zipfile"
-            # Extract to release directory
-            unzip -q -o "$zipfile" -d release/
+          # Extract each artifact to its own subdirectory
+          for zipfile in artifacts/mnem-*/*.zip; do
+            if [ -f "$zipfile" ]; then
+              # Get platform name from directory
+              platform=$(echo "$zipfile" | grep -oP 'mnem-\K[^/]+')
+              echo "Processing platform: $platform"
+
+              # Create platform subdirectory
+              platform_dir="temp_extract/$platform"
+              mkdir -p "$platform_dir"
+
+              # Extract to platform directory
+              unzip -q -o "$zipfile" -d "$platform_dir"
+
+              # Create platform-specific ZIP
+              (cd "$platform_dir" && zip -qr "../../release/mnem-$platform.zip" *)
+            fi
           done
 
-          # Move binaries from subdirectories to release root
-          find release -mindepth 2 -type f -exec mv {} release/ \;
-
-          # Remove empty subdirectories
-          find release -mindepth 1 -type d -delete 2>/dev/null || true
+          # Clean up temp directory
+          rm -rf temp_extract
 
           # List what we have
           echo "Files prepared for release:"
