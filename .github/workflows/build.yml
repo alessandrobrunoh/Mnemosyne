@@ -76,6 +76,7 @@ jobs:
 
   release:
     needs: build
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -119,5 +120,6 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.ref_name }}
           files: release/*
           draft: false
