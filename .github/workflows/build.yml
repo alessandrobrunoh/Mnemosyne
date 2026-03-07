@@ -94,7 +94,7 @@ jobs:
           find artifacts -name "*.zip" -type f | while read zipfile; do
             echo "Found artifact: $zipfile"
             # Extract to release directory
-            unzip -q "$zipfile" -d release/
+            unzip -q -o "$zipfile" -d release/
           done
 
           # Move binaries from subdirectories to release root
