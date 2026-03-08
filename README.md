@@ -1,35 +1,16 @@
 <div align="center">
 
 # Mnemosyne
-
-## Development Notes
-
-To test the CLI after building:
-```bash
-# Build the binary
-cargo build --release -p mnem-cli
-
-# Run directly from target (avoids PATH issues)
-./target/release/mnem r ciao.txt --list
-
-# Or install to cargo bin
-cargo install --path crates/apps/mnem-cli
-mnem r ciao.txt --list
-```
-
-
-### Local History for Developers
+**Never lose code again.** Sync your history across your favorite IDEs. Local snapshots, semantic understanding, and instant restore—all offline.
 
 [![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-APACHE-blue.svg)](LICENSE)
-
-**Never lose code again.** Sync your history across your favorite IDEs. Local snapshots, semantic understanding, and instant restore—all offline.
 
 </div>
 
 ---
 
-## The Problem We Solve
+## Why Mnemosyne?
 
 Every developer knows this pain:
 
@@ -87,6 +68,19 @@ cd Mnemosyne/mnemosyne
 cargo build --release -p mnem-cli -p mnem-daemon
 # Copy binaries to your PATH
 ```
+
+---
+
+## Features
+
+- **Auto Snapshots** — Every file save captured automatically
+- **Branch Tracking** — History organized by Git branch
+- **Semantic Deltas** — Understands code structure (functions, classes)
+- **Instant Restore** — Millisecond recovery to any point
+- **Full-Text Search** — Search across all history
+- **10-100x Storage** — Deduplication vs full copies
+- **Symbol History** — Track how functions and classes evolve
+- **IDE Integration** — Open versions in your editor
 
 ---
 
@@ -199,37 +193,15 @@ global = ["*.log", "*.tmp"]
 
 ---
 
-## Features
-
-- **Auto Snapshots** — Every file save captured automatically
-- **Branch Tracking** — History organized by Git branch
-- **Semantic Deltas** — Understands code structure (functions, classes)
-- **Instant Restore** — Millisecond recovery to any point
-- **Full-Text Search** — Search across all history
-- **10-100x Storage** — Deduplication vs full copies
-- **Symbol History** — Track how functions and classes evolve
-- **IDE Integration** — Open versions in your editor
-
----
-
-## Use Cases
-
-1. **Recover lost work** — "I accidentally deleted this function"
-2. **See evolution** — "How did I implement this feature?"
-3. **Compare approaches** — "What did I try before?"
-4. **Debug regressions** — "When did this break?"
-5. **Share snapshots** — Send a version to a colleague
-
----
-
 ## Integrations
 
-- **VSCode** — Coming soon
-- **Zed** — Built-in Mnemosyne support
 - **CLI** — Full-featured command line
+- **VSCode** — Coming soon
+- **Zed** — Coming soon
+- **JetBrains** - Coming soon
 
 ---
 
 ## License
 
-APACHE 2.0 — See [LICENSE](LICENSE)
+MIT — See [LICENSE](LICENSE)
