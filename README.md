@@ -12,20 +12,21 @@
 
 ## Why Mnemosyne?
 
-Every developer knows this pain:
+...
 
-> **It's 11 PM. You've been refactoring for 3 hours. Suddenly—accident.** You press `Ctrl+Z` one too many times. The function you spent all evening building is gone. No git commit. No backup. Just... gone.
+---
 
-**This is why Mnemosyne exists.**
+## Installation
 
-Git is great for commits—but what about everything in between? Every developer loses work between commits. Mnemosyne captures **every save**, so you can always go back.
+### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1 | iex
+```
 
-| Before Mnemosyne | After Mnemosyne |
-|-----------------|-----------------|
-| Ctrl+Z forever (and then too far) | Instant restore of **any** previous save |
-| "I should commit" → forget → regret | Auto-captures every save |
-| "When did I delete this?" | Full searchable history |
-| 50 versions = 50 full copies | 50 versions = ~1 copy (dedup) |
+### macOS / Linux
+```bash
+curl -fsSL https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.sh | bash
+```
 
 ---
 
@@ -48,18 +49,6 @@ mnem r <path/to/file> 1            # Restore verison 1
 ```
 
 ---
-
-## Installation
-
-### Windows (PowerShell)
-```powershell
-irm https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1 | iex
-```
-
-### macOS / Linux
-```bash
-curl -fsSL https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.sh | bash
-```
 
 ### From Source
 ```bash
