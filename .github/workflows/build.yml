@@ -100,8 +100,9 @@ jobs:
           # Extract each artifact to its own subdirectory
           for zipfile in artifacts/mnem-*/*.zip; do
             if [ -f "$zipfile" ]; then
-              # Get platform name from directory
-              platform=$(echo "$zipfile" | grep -oP 'mnem-\K[^/]+')
+              # Get platform name from artifact directory name (e.g. mnem-linux-x86_64 -> linux-x86_64)
+              artifact_dir=$(dirname "$zipfile" | xargs basename)
+              platform="${artifact_dir#mnem-}"
               echo "Processing platform: $platform"
 
               # Create platform subdirectory
