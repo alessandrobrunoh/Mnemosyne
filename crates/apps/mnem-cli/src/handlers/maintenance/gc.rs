@@ -1,32 +1,39 @@
 use anyhow::Result;
+use mnem_core::{client::DaemonClient, protocol::methods};
 
-pub fn handle_gc(keep: Option<usize>, dry_run: bool, aggressive: bool) -> Result<()> {
-    use mnem_core::env::get_base_dir;
-    use mnem_core::storage::Repository;
+pub fn handle_gc(keep: Option<usize>, dry_run: bool, _aggressive: bool) -> Result<()> {
+    use crate::ui::Layout;
+    use crossterm::style::Stylize;
 
-    let base_dir = get_base_dir()?;
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::open(base_dir, cwd)?;
+    let layout = Layout::new();
+    layout.section_start("gc", "Garbage Collection");
 
     if dry_run {
-        println!("Dry run - would clean old snapshots");
-        println!("(Preview - coming soon)");
+        layout.item_simple("Dry run - no changes will be made");
+        layout.section_end();
         return Ok(());
     }
 
-    println!("Running garbage collection...");
+    match DaemonClient::connect() {
+        Ok(mut client) => {
+            let params = serde_json::json!({
+                "keep_days": keep,
+            });
 
-    if let Some(days) = keep {
-        println!("  Keeping last {} days", days);
+            let res = client.call(methods::MAINTENANCE_GC, params)?;
+            let pruned = res["pruned"].as_u64().unwrap_or(0);
+
+            layout.item_simple(&format!(
+                "{} Successfully pruned {} orphan chunks.",
+                "√".green(),
+                pruned.to_string().bold()
+            ));
+        }
+        Err(_) => {
+            layout.error("Daemon is not running. Start it with 'mnem on'");
+        }
     }
 
-    if aggressive {
-        println!("  Aggressive mode: enabled");
-    }
-
-    // This would actually run the GC
-    // let removed = repo.run_gc()?;
-    println!("✓ Garbage collection complete");
-
+    layout.section_end();
     Ok(())
 }
