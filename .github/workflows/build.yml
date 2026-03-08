@@ -32,7 +32,7 @@ jobs:
             arch: x86_64
             ext: ""
 
-          # macOS ARM64 (Apple Silicon) - using macos-14 which supports ARM
+          # macOS ARM64 (Apple Silicon)
           - os: macos-latest
             platform: macos
             arch: arm64
@@ -56,29 +56,30 @@ jobs:
         if: matrix.arch == 'arm64'
         run: cargo build --release --package mnem-cli --package mnem-daemon --target aarch64-apple-darwin
 
-      - name: Create archive
+      - name: Collect binaries
         shell: bash
         run: |
+          mkdir -p dist
+
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cd target/release
-            7z a ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem${{ matrix.ext }} mnem-daemon${{ matrix.ext }}
-            cd ../..
+            cp target/release/mnem.exe dist/mnem.exe
+            cp target/release/mnem-daemon.exe dist/mnem-daemon.exe
           elif [ "${{ matrix.arch }}" = "arm64" ]; then
-            cd target/aarch64-apple-darwin/release
-            zip -r ../../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem mnem-daemon
-            cd ../../..
+            cp target/aarch64-apple-darwin/release/mnem dist/mnem
+            cp target/aarch64-apple-darwin/release/mnem-daemon dist/mnem-daemon
           else
-            cd target/release
-            zip -r ../../mnem-${{ matrix.platform }}-${{ matrix.arch }}.zip mnem mnem-daemon
-            cd ../..
+            cp target/release/mnem dist/mnem
+            cp target/release/mnem-daemon dist/mnem-daemon
           fi
-          ls -la mnem-*
+
+          echo "Binaries collected:"
+          ls -lh dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mnem-${{ matrix.platform }}-${{ matrix.arch }}
-          path: mnem-${{ matrix.platform }}-${{ matrix.arch }}.*
+          path: dist/
 
   release:
     needs: build
@@ -92,41 +93,25 @@ jobs:
         with:
           path: artifacts
 
-      - name: Extract artifacts and prepare binaries
+      - name: Create platform ZIPs
         run: |
           mkdir -p release
-          mkdir -p temp_extract
 
-          # Extract each artifact to its own subdirectory
-          for zipfile in artifacts/mnem-*/*.zip; do
-            if [ -f "$zipfile" ]; then
-              # Get platform name from artifact directory name (e.g. mnem-linux-x86_64 -> linux-x86_64)
-              artifact_dir=$(dirname "$zipfile" | xargs basename)
-              platform="${artifact_dir#mnem-}"
-              echo "Processing platform: $platform"
+          for platform_dir in artifacts/mnem-*/; do
+            platform_name=$(basename "$platform_dir" | sed 's/^mnem-//')
+            echo "Packaging platform: $platform_name"
 
-              # Create platform subdirectory
-              platform_dir="temp_extract/$platform"
-              mkdir -p "$platform_dir"
+            zip -qj "release/mnem-${platform_name}.zip" "$platform_dir"*
 
-              # Extract to platform directory
-              unzip -q -o "$zipfile" -d "$platform_dir"
-
-              # Create platform-specific ZIP
-              (cd "$platform_dir" && zip -qr "../../release/mnem-$platform.zip" *)
-            fi
+            echo "Created: mnem-${platform_name}.zip"
           done
 
-          # Clean up temp directory
-          rm -rf temp_extract
-
-          # List what we have
           echo "Files prepared for release:"
           ls -lh release/
 
-      - name: Create Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          files: release/*
+          files: release/*.zip
           draft: false
