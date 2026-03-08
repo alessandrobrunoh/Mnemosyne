@@ -49,8 +49,20 @@ pub fn handle_uninstall() -> Result<()> {
                 ])
                 .output()?;
 
-            layout.success_bright("✓ Mnemosyne uninstalled successfully");
-            layout.info("You can now remove this binary");
+            if output.status.success() {
+                layout.success_bright("✓ Mnemosyne uninstalled successfully");
+                layout.info("You can now remove this binary");
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                layout.error("Uninstall script failed");
+                if !stdout.is_empty() {
+                    layout.info(&format!("Output: {}", stdout.trim()));
+                }
+                if !stderr.is_empty() {
+                    layout.info(&format!("Error: {}", stderr.trim()));
+                }
+            }
         } else {
             layout.warning("Uninstall script not found");
             layout.info("Please run the uninstall script manually:");
@@ -80,8 +92,20 @@ pub fn handle_uninstall() -> Result<()> {
         if let Some(script) = script_path {
             let output = Command::new("bash").arg(&script).output()?;
 
-            layout.success_bright("✓ Mnemosyne uninstalled successfully");
-            layout.info("You can now remove this binary");
+            if output.status.success() {
+                layout.success_bright("✓ Mnemosyne uninstalled successfully");
+                layout.info("You can now remove this binary");
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                layout.error("Uninstall script failed");
+                if !stdout.is_empty() {
+                    layout.info(&format!("Output: {}", stdout.trim()));
+                }
+                if !stderr.is_empty() {
+                    layout.info(&format!("Error: {}", stderr.trim()));
+                }
+            }
         } else {
             layout.warning("Uninstall script not found");
             layout.info("Please run: bash scripts/uninstall.sh");

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::path::Component;
 
 use crate::handlers::files::history::compute_diff_stats;
 use crate::ui::Layout;
@@ -8,7 +9,7 @@ use mnem_core::protocol::methods;
 use mnem_core::storage::Repository;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 /// Resolve the project root from an optional file argument.
@@ -35,6 +36,26 @@ fn get_project_from_file(file: &Option<String>) -> Result<PathBuf> {
         ));
     }
     Ok(start)
+}
+
+/// Normalize a path string by resolving `.` and `..` components without
+/// touching the filesystem. This is needed on Windows where joining a
+/// relative path like `.\file.txt` onto an absolute root produces a path
+/// with a stray `CurDir` component (e.g. `C:\root\.\file.txt`) that
+/// breaks both `Path::starts_with` comparisons and substring searches in
+/// the database.
+fn normalize_path(path: &str) -> String {
+    let mut buf = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                buf.pop();
+            }
+            c => buf.push(c),
+        }
+    }
+    buf.to_string_lossy().to_string()
 }
 
 fn cleanup_old_temp_files() {
@@ -151,9 +172,9 @@ pub fn handle_r(
     // --list
     if list {
         let full_path = if std::path::Path::new(f).is_absolute() {
-            f.clone()
+            normalize_path(f)
         } else {
-            project_path.join(f).to_string_lossy().to_string()
+            normalize_path(&project_path.join(f).to_string_lossy())
         };
 
         // Try daemon (fast path — no temp files needed)

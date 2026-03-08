@@ -28,3 +28,4 @@ tree-sitter-ruby = { workspace = true }
 notify = "6.1"
 clap = { version = "4.0", features = ["derive"] }
 reqwest.workspace = true
+zip.workspace = true

@@ -411,7 +411,25 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     }
                 };
 
-            let file_path = std::path::Path::new(&params.file_path);
+            // Normalize the path to remove stray `.` and `..` components that can
+            // appear on Windows when the CLI joins a relative arg like `.\file.txt`
+            // onto an absolute root (e.g. `C:\root\.\file.txt`).  Without this,
+            // both `Path::starts_with` and the DB substring search return nothing.
+            let normalized_file_path: String = {
+                use std::path::Component;
+                let mut buf = PathBuf::new();
+                for component in std::path::Path::new(&params.file_path).components() {
+                    match component {
+                        Component::CurDir => {}
+                        Component::ParentDir => {
+                            buf.pop();
+                        }
+                        c => buf.push(c),
+                    }
+                }
+                buf.to_string_lossy().to_string()
+            };
+            let file_path = std::path::Path::new(&normalized_file_path);
             info!("SNAPSHOT_LIST: Requested file_path: {:?}", params.file_path);
             info!(
                 "SNAPSHOT_LIST: Iterating through {} repos",
@@ -429,7 +447,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 if file_path.starts_with(project_path) {
                     info!("SNAPSHOT_LIST: Found matching project: {:?}", project_path);
                     info!("SNAPSHOT_LIST: Cache hit for {:?}", params.file_path);
-                    if let Some(cached) = state.get_cached_history(&params.file_path) {
+                    if let Some(cached) = state.get_cached_history(&normalized_file_path) {
                         info!("SNAPSHOT_LIST: Found {} cached versions", cached.len());
                         let infos: Vec<protocol::SnapshotInfo> = cached
                             .into_iter()
@@ -467,14 +485,14 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
                     // Cache miss - fetch from database
                     info!("SNAPSHOT_LIST: Cache miss, fetching from database");
-                    match repo.get_history(&params.file_path) {
+                    match repo.get_history(&normalized_file_path) {
                         Ok(history) => {
                             info!(
                                 "SNAPSHOT_LIST: Found {} versions in database",
                                 history.len()
                             );
                             // Cache the result
-                            state.cache_history(params.file_path.clone(), history.clone());
+                            state.cache_history(normalized_file_path.clone(), history.clone());
 
                             let infos: Vec<protocol::SnapshotInfo> = history
                                 .into_iter()
@@ -590,7 +608,8 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             JsonRpcResponse::error(req.id, -32000, "No watched project owns this file".into())
         }
 
-        protocol::methods::SNAPSHOT_RESTORE_SYMBOL | protocol::methods::SNAPSHOT_RESTORE_SYMBOL_V1 => {
+        protocol::methods::SNAPSHOT_RESTORE_SYMBOL
+        | protocol::methods::SNAPSHOT_RESTORE_SYMBOL_V1 => {
             let params: protocol::SnapshotRestoreSymbolParams =
                 match serde_json::from_value(req.params.clone()) {
                     Ok(p) => p,
@@ -614,9 +633,15 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                         .strip_prefix(&repo.project.path)
                         .unwrap_or(&params.target_path)
                         .trim_start_matches('/');
-                    match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name) {
+                    match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name)
+                    {
                         Ok(_) => {
-                            info!("Restored symbol '{}' in {} to {}", params.symbol_name, clean_path, &params.content_hash[..8]);
+                            info!(
+                                "Restored symbol '{}' in {} to {}",
+                                params.symbol_name,
+                                clean_path,
+                                &params.content_hash[..8]
+                            );
                             return JsonRpcResponse::success(
                                 req.id,
                                 json!({ "status": "restored", "hash": params.content_hash }),

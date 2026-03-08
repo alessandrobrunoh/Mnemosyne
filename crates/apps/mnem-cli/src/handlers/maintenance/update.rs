@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::Deserialize;
-use std::process::Command;
+use std::io::Read;
 
 use crate::ui::Layout;
 
@@ -9,7 +9,6 @@ const GITHUB_REPO: &str = "alessandrobrunoh/Mnemosyne";
 #[derive(Deserialize)]
 struct GitHubRelease {
     tag_name: String,
-    name: String,
     assets: Vec<GitHubAsset>,
 }
 
@@ -68,114 +67,217 @@ pub fn handle_update(check_only: bool) -> Result<()> {
         return Ok(());
     }
 
-    let (cli_asset, daemon_asset) = find_assets(&release.assets)?;
+    #[cfg(windows)]
+    install_windows(&layout, &client, &release)?;
 
-    layout.info("Downloading update...");
+    #[cfg(unix)]
+    install_unix(&layout, &client, &release)?;
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn install_windows(
+    layout: &crate::ui::Layout,
+    client: &reqwest::blocking::Client,
+    release: &GitHubRelease,
+) -> Result<()> {
+    // The Windows release ships as a single zip archive.
+    let zip_asset = release
+        .assets
+        .iter()
+        .find(|a| {
+            let name = a.name.to_lowercase();
+            name.contains("windows") && name.ends_with(".zip")
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Windows zip asset not found in release '{}'. \
+                 Expected an asset whose name contains 'windows' and ends with '.zip'.",
+                release.tag_name
+            )
+        })?;
+
+    layout.info(&format!("Downloading {}...", zip_asset.name));
+
+    let zip_bytes = client
+        .get(&zip_asset.browser_download_url)
+        .send()?
+        .bytes()?;
+
+    layout.success_bright("✓ Download complete!");
     layout.empty();
 
+    // Extract mnem.exe and mnem-daemon.exe from the zip into a temp dir.
+    let temp_dir = std::env::temp_dir().join("mnemosyne-update");
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)?;
+    }
+    std::fs::create_dir_all(&temp_dir)?;
+
+    let cursor = std::io::Cursor::new(&zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| anyhow::anyhow!("Failed to open zip archive: {}", e))?;
+
+    let required = ["mnem.exe", "mnem-daemon.exe"];
+    let mut extracted: Vec<std::path::PathBuf> = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| anyhow::anyhow!("Failed to read zip entry: {}", e))?;
+
+        let entry_name = entry.name().to_string();
+        let file_name = std::path::Path::new(&entry_name)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if required.contains(&file_name.as_str()) {
+            let dest = temp_dir.join(&file_name);
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)?;
+            std::fs::write(&dest, &buf)?;
+            layout.info(&format!("Extracted: {}", file_name));
+            extracted.push(dest);
+        }
+    }
+
+    let missing: Vec<&str> = required
+        .iter()
+        .filter(|&&name| {
+            !extracted
+                .iter()
+                .any(|p| p.file_name().map(|n| n == name).unwrap_or(false))
+        })
+        .copied()
+        .collect();
+
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "The following binaries were not found in the archive: {}",
+            missing.join(", ")
+        );
+    }
+
+    // Install into ~/.mnemosyne/bin/
     let install_dir = dirs::home_dir()
         .map(|p| p.join(".mnemosyne").join("bin"))
-        .unwrap_or_default();
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
 
     if !install_dir.exists() {
         std::fs::create_dir_all(&install_dir)?;
     }
 
-    let current_exe = std::env::current_exe()
-        .map_err(|e| anyhow::anyhow!("Could not find current executable: {}", e))?;
+    // On Windows the running binary cannot be replaced in-place while it is
+    // executing.  We write each binary as <name>.new and ask the user to
+    // replace them after stopping the daemon.
+    for src in &extracted {
+        let file_name = src.file_name().unwrap().to_string_lossy();
+        let dest_new = install_dir.join(format!("{}.new", file_name));
+        std::fs::copy(src, &dest_new)?;
+        layout.info(&format!("Staged: {}", dest_new.display()));
+    }
 
-    let temp_dir = std::env::temp_dir();
+    // Clean up temp dir.
+    let _ = std::fs::remove_dir_all(&temp_dir);
 
-    // Determine binary names based on OS
-    let (cli_name, daemon_name) = if cfg!(target_os = "windows") {
-        ("mnem.exe", "mnem-daemon.exe")
-    } else {
-        ("mnem", "mnem-daemon")
-    };
-
-    // Download CLI - preserve original filename from asset
-    layout.info("Downloading mnem CLI...");
-    let cli_response = client.get(&cli_asset.browser_download_url).send()?;
-    let cli_bytes = cli_response.bytes()?;
-    let cli_path = temp_dir.join(&cli_asset.name);
-    std::fs::write(&cli_path, &cli_bytes)?;
-
-    // Download Daemon
-    layout.info("Downloading mnem daemon...");
-    let daemon_response = client.get(&daemon_asset.browser_download_url).send()?;
-    let daemon_bytes = daemon_response.bytes()?;
-    let daemon_path = temp_dir.join(&daemon_asset.name);
-    std::fs::write(&daemon_path, &daemon_bytes)?;
-
-    layout.success_bright("✓ Download complete!");
     layout.empty();
-
-    // Replace binaries with OS-appropriate names
-    let target_cli = install_dir.join(cli_name);
-    let target_daemon = install_dir.join(daemon_name);
-
-    // On Windows, download to .new names to avoid file locking
-    // User will need to restart manually
-    #[cfg(windows)]
-    {
-        let new_cli = install_dir.join(format!("{}.new", cli_name));
-        let new_daemon = install_dir.join(format!("{}.new", daemon_name));
-
-        // Copy to .new files
-        std::fs::copy(&cli_path, &new_cli)?;
-        std::fs::copy(&daemon_path, &new_daemon)?;
-
-        layout.success_bright("✓ Update downloaded!");
-        layout.empty();
-        layout.warning("Please restart mnem to complete the update:");
-        layout.info(&format!("  1. Stop daemon: mnem off"));
-        layout.info(&format!("  2. Replace {} with {}.new", cli_name, cli_name));
-        layout.info(&format!(
-            "  3. Replace {} with {}.new",
-            daemon_name, daemon_name
-        ));
-        layout.info("  4. Run 'mnem on' to start");
+    layout.success_bright("✓ Update staged successfully!");
+    layout.empty();
+    layout.warning("To complete the update, run the following commands:");
+    layout.info("  1. mnem off");
+    layout.info("  2. In your install directory, rename each .new file:");
+    for name in &required {
+        layout.info(&format!("       Rename-Item '{0}.new' '{0}'", name));
     }
-
-    // On Unix, stop daemon and replace directly
-    #[cfg(unix)]
-    {
-        // Stop daemon
-        layout.info("Stopping daemon...");
-        let _ = Command::new(&current_exe).arg("off").output();
-
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::rename(&cli_path, &target_cli)?;
-        std::fs::rename(&daemon_path, &target_daemon)?;
-        std::fs::set_permissions(&target_cli, std::fs::Permissions::from_mode(0o755))?;
-        std::fs::set_permissions(&target_daemon, std::fs::Permissions::from_mode(0o755))?;
-
-        layout.success_bright("✓ Update installed successfully!");
-        layout.empty();
-        layout.info("Run 'mnem on' to start the daemon");
-    }
+    layout.info("  3. mnem on");
 
     Ok(())
 }
 
-fn find_assets(assets: &[GitHubAsset]) -> Result<(&GitHubAsset, &GitHubAsset)> {
+#[cfg(unix)]
+fn install_unix(
+    layout: &crate::ui::Layout,
+    client: &reqwest::blocking::Client,
+    release: &GitHubRelease,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let (cli_asset, daemon_asset) = find_unix_assets(&release.assets)?;
+
+    let install_dir = dirs::home_dir()
+        .map(|p| p.join(".mnemosyne").join("bin"))
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+
+    if !install_dir.exists() {
+        std::fs::create_dir_all(&install_dir)?;
+    }
+
+    let temp_dir = std::env::temp_dir();
+
+    layout.info("Downloading mnem CLI...");
+    let cli_bytes = client
+        .get(&cli_asset.browser_download_url)
+        .send()?
+        .bytes()?;
+    let cli_tmp = temp_dir.join(&cli_asset.name);
+    std::fs::write(&cli_tmp, &cli_bytes)?;
+
+    layout.info("Downloading mnem daemon...");
+    let daemon_bytes = client
+        .get(&daemon_asset.browser_download_url)
+        .send()?
+        .bytes()?;
+    let daemon_tmp = temp_dir.join(&daemon_asset.name);
+    std::fs::write(&daemon_tmp, &daemon_bytes)?;
+
+    layout.success_bright("✓ Download complete!");
+    layout.empty();
+
+    // Stop the daemon before replacing the binaries.
+    layout.info("Stopping daemon...");
+    let current_exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Could not find current executable: {}", e))?;
+    let _ = Command::new(&current_exe).arg("off").output();
+
+    let target_cli = install_dir.join("mnem");
+    let target_daemon = install_dir.join("mnem-daemon");
+
+    std::fs::rename(&cli_tmp, &target_cli)?;
+    std::fs::rename(&daemon_tmp, &target_daemon)?;
+    std::fs::set_permissions(&target_cli, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::set_permissions(&target_daemon, std::fs::Permissions::from_mode(0o755))?;
+
+    layout.success_bright("✓ Update installed successfully!");
+    layout.empty();
+    layout.info("Run 'mnem on' to start the daemon");
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn find_unix_assets(assets: &[GitHubAsset]) -> Result<(&GitHubAsset, &GitHubAsset)> {
     let cli_asset = assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
-            name.contains("mnem")
-                && !name.contains("daemon")
-                && (name.ends_with(".exe") || name == "mnem" || name.starts_with("mnem-"))
+            // Match standalone "mnem" or "mnem-<version>" but not "mnem-daemon"
+            name == "mnem"
+                || (name.starts_with("mnem-")
+                    && !name.contains("daemon")
+                    && !name.ends_with(".zip"))
         })
-        .ok_or_else(|| anyhow::anyhow!("CLI asset not found"))?;
+        .ok_or_else(|| anyhow::anyhow!("CLI asset not found in release"))?;
 
     let daemon_asset = assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
-            name.contains("mnem") && name.contains("daemon")
+            name.contains("mnem") && name.contains("daemon") && !name.ends_with(".zip")
         })
-        .ok_or_else(|| anyhow::anyhow!("Daemon asset not found"))?;
+        .ok_or_else(|| anyhow::anyhow!("Daemon asset not found in release"))?;
 
     Ok((cli_asset, daemon_asset))
 }
