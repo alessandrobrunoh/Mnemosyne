@@ -165,7 +165,8 @@ async fn handle_request(req: JsonRpcRequest) -> JsonRpcResponse {
         "initialize" => Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {
-                "tools": {}
+                "tools": {},
+                "prompts": {}
             },
             "serverInfo": { "name": "mnem-mcp", "version": "0.2.0" }
         })),
@@ -179,6 +180,8 @@ async fn handle_request(req: JsonRpcRequest) -> JsonRpcResponse {
         }
         "tools/list" => Ok(tools_list()),
         "tools/call" => handle_tool_call(req.params).await,
+        "prompts/list" => Ok(prompts_list()),
+        "prompts/get" => handle_prompt_get(req.params),
         _ => Err(anyhow::anyhow!("Method not found")),
     };
 
@@ -452,4 +455,307 @@ async fn handle_tool_call(params: Value) -> Result<Value> {
 /// Wraps text in the MCP content response format.
 fn mcp_text(text: &str) -> Value {
     json!({ "content": [{ "type": "text", "text": text }] })
+}
+
+// ---------------------------------------------------------------------------
+// Agent Skills (MCP Prompts)
+// ---------------------------------------------------------------------------
+
+/// Returns the list of available agent skill prompts.
+fn prompts_list() -> Value {
+    json!({
+        "prompts": [
+            {
+                "name": "recover_lost_code",
+                "description": "Guide to recovering accidentally deleted or overwritten code. Walks through listing file history, previewing past snapshots, and restoring the desired version.",
+                "arguments": [
+                    {
+                        "name": "file_path",
+                        "description": "Path to the file whose lost code you want to recover (relative or absolute).",
+                        "required": true
+                    }
+                ]
+            },
+            {
+                "name": "inspect_file_history",
+                "description": "Guide to exploring the full snapshot history of a file, including timestamps, branches, and content previews.",
+                "arguments": [
+                    {
+                        "name": "file_path",
+                        "description": "Path to the file to inspect (relative or absolute).",
+                        "required": true
+                    },
+                    {
+                        "name": "limit",
+                        "description": "Maximum number of history entries to show (default: 10).",
+                        "required": false
+                    }
+                ]
+            },
+            {
+                "name": "compare_versions",
+                "description": "Guide to producing a unified diff between two historical snapshots of a file, or between a snapshot and the current file on disk.",
+                "arguments": [
+                    {
+                        "name": "file_path",
+                        "description": "Path to the file to compare (relative or absolute).",
+                        "required": true
+                    },
+                    {
+                        "name": "base_hash",
+                        "description": "Content hash of the older snapshot to use as the diff base. Leave empty to auto-detect.",
+                        "required": false
+                    },
+                    {
+                        "name": "target_hash",
+                        "description": "Content hash of the newer snapshot, or '__DISK__' to compare against the current file.",
+                        "required": false
+                    }
+                ]
+            },
+            {
+                "name": "track_symbol_evolution",
+                "description": "Guide to tracing how a specific function, struct, or class changed across snapshots over time.",
+                "arguments": [
+                    {
+                        "name": "symbol_name",
+                        "description": "The name of the symbol (function, struct, class, etc.) to track.",
+                        "required": true
+                    }
+                ]
+            },
+            {
+                "name": "restore_symbol",
+                "description": "Guide to surgically restoring a single symbol (function or struct) from a previous snapshot without touching the rest of the file.",
+                "arguments": [
+                    {
+                        "name": "file_path",
+                        "description": "Path to the file containing the symbol (relative or absolute).",
+                        "required": true
+                    },
+                    {
+                        "name": "symbol_name",
+                        "description": "The name of the symbol to restore.",
+                        "required": true
+                    }
+                ]
+            },
+            {
+                "name": "search_history",
+                "description": "Guide to performing a full-text or regex search across all historical snapshots of every watched project.",
+                "arguments": [
+                    {
+                        "name": "query",
+                        "description": "The text or regex pattern to search for across all history.",
+                        "required": true
+                    }
+                ]
+            },
+            {
+                "name": "manage_project",
+                "description": "Guide to listing watched projects, starting to watch a new project directory, or stopping tracking of a project.",
+                "arguments": []
+            }
+        ]
+    })
+}
+
+/// Handles a `prompts/get` request and returns the prompt messages for the requested skill.
+fn handle_prompt_get(params: Value) -> Result<Value> {
+    let name = params["name"].as_str().context("Missing prompt name")?;
+    let args = &params["arguments"];
+
+    let messages = match name {
+        "recover_lost_code" => {
+            let file_path = args["file_path"].as_str().unwrap_or("<file_path>");
+            vec![
+                user_msg(&format!(
+                    "I need to recover lost or deleted code from the file '{}'.",
+                    file_path
+                )),
+                assistant_msg(&format!(
+                    "I'll help you recover the lost code from '{}'. Here's the plan:\n\
+                     \n\
+                     **Step 1 – List all snapshots for the file**\n\
+                     I'll call `mnem_get_file_versions` with `file_path: \"{}\"` to retrieve the full history of this file, including timestamps and content hashes.\n\
+                     \n\
+                     **Step 2 – Preview the relevant snapshots**\n\
+                     Once we have the snapshot list, I'll call `mnem_get_file_content` with the `content_hash` of each promising snapshot so you can preview the content.\n\
+                     \n\
+                     **Step 3 – Restore the correct version**\n\
+                     When you identify the version that contains your lost code, I'll call `mnem_restore_file_version` with the matching `content_hash` to overwrite the file with that historical snapshot.\n\
+                     \n\
+                     Let me start by fetching the snapshot history.",
+                    file_path, file_path
+                )),
+            ]
+        }
+
+        "inspect_file_history" => {
+            let file_path = args["file_path"].as_str().unwrap_or("<file_path>");
+            let limit = args["limit"].as_u64().unwrap_or(10);
+            vec![
+                user_msg(&format!(
+                    "Show me the full snapshot history for the file '{}', up to {} entries.",
+                    file_path, limit
+                )),
+                assistant_msg(&format!(
+                    "I'll inspect the history of '{}' for you.\n\
+                     \n\
+                     **Step 1 – Fetch snapshot list**\n\
+                     I'll call `mnem_get_file_versions` with `file_path: \"{}\"` and `limit: {}` to retrieve the most recent snapshots, including their timestamp, Git branch, and content hash.\n\
+                     \n\
+                     **Step 2 – Preview any version on demand**\n\
+                     For any snapshot that looks interesting, I can call `mnem_get_file_content` with its `content_hash` to show the exact contents at that point in time.\n\
+                     \n\
+                     Let me fetch the history now.",
+                    file_path, file_path, limit
+                )),
+            ]
+        }
+
+        "compare_versions" => {
+            let file_path = args["file_path"].as_str().unwrap_or("<file_path>");
+            let base = args["base_hash"].as_str().unwrap_or("(auto)");
+            let target = args["target_hash"].as_str().unwrap_or("__DISK__");
+            vec![
+                user_msg(&format!(
+                    "Show me the diff for '{}' between snapshot '{}' and '{}'.",
+                    file_path, base, target
+                )),
+                assistant_msg(&format!(
+                    "I'll produce a diff for '{}' between the two versions.\n\
+                     \n\
+                     **Step 1 – Ensure we have snapshot hashes**\n\
+                     If you haven't provided explicit hashes yet, I'll first call `mnem_get_file_versions` to list the available snapshots so we can pick the right ones.\n\
+                     \n\
+                     **Step 2 – Generate the diff**\n\
+                     I'll call `mnem_get_file_diff` with:\n\
+                     - `file_path`: \"{}\"\n\
+                     - `base_hash`: \"{}\"\n\
+                     - `target_hash`: \"{}\"\n\
+                     \n\
+                     Use `__DISK__` as `target_hash` to compare a historical snapshot against the current file on disk.\n\
+                     \n\
+                     Let me run the diff now.",
+                    file_path, file_path, base, target
+                )),
+            ]
+        }
+
+        "track_symbol_evolution" => {
+            let symbol = args["symbol_name"].as_str().unwrap_or("<symbol_name>");
+            vec![
+                user_msg(&format!(
+                    "I want to trace how the symbol '{}' has evolved over time.",
+                    symbol
+                )),
+                assistant_msg(&format!(
+                    "I'll build a timeline of how '{}' changed across snapshots.\n\
+                     \n\
+                     **Step 1 – Retrieve symbol history**\n\
+                     I'll call `mnem_get_symbol_versions` with `symbol_name: \"{}\"` to get every recorded version of this symbol, along with its definition, file location, and timestamp.\n\
+                     \n\
+                     **Step 2 – Highlight key changes**\n\
+                     I'll summarize the differences between consecutive versions, highlighting when the logic (structural hash) actually changed vs. when only comments or formatting were updated.\n\
+                     \n\
+                     **Step 3 – Restore if needed**\n\
+                     If you want to roll back to a specific version of the symbol, I'll call `mnem_restore_symbol_version` with the matching `content_hash` and `symbol_name`.\n\
+                     \n\
+                     Let me start by fetching the symbol history.",
+                    symbol, symbol
+                )),
+            ]
+        }
+
+        "restore_symbol" => {
+            let file_path = args["file_path"].as_str().unwrap_or("<file_path>");
+            let symbol = args["symbol_name"].as_str().unwrap_or("<symbol_name>");
+            vec![
+                user_msg(&format!(
+                    "Restore the symbol '{}' in '{}' to a previous version without changing anything else.",
+                    symbol, file_path
+                )),
+                assistant_msg(&format!(
+                    "I'll surgically restore '{}' in '{}' while leaving the rest of the file intact.\n\
+                     \n\
+                     **Step 1 – Find relevant snapshots**\n\
+                     I'll call `mnem_get_symbol_versions` with `symbol_name: \"{}\"` to see all recorded versions of this symbol.\n\
+                     \n\
+                     **Step 2 – Preview the target version**\n\
+                     Once you choose the snapshot you want to restore from, I can call `mnem_get_file_content` with the snapshot's `content_hash` to confirm the symbol looks correct.\n\
+                     \n\
+                     **Step 3 – Perform the surgical restore**\n\
+                     I'll call `mnem_restore_symbol_version` with:\n\
+                     - `file_path`: \"{}\"\n\
+                     - `target_hash`: (chosen snapshot hash)\n\
+                     - `symbol_name`: \"{}\"\n\
+                     \n\
+                     This replaces only the specified symbol; all surrounding code is untouched.\n\
+                     \n\
+                     Let me fetch the available symbol versions now.",
+                    symbol, file_path, symbol, file_path, symbol
+                )),
+            ]
+        }
+
+        "search_history" => {
+            let query = args["query"].as_str().unwrap_or("<query>");
+            vec![
+                user_msg(&format!(
+                    "Search all of Mnemosyne's snapshot history for '{}'.",
+                    query
+                )),
+                assistant_msg(&format!(
+                    "I'll search across every recorded snapshot for '{}'.\n\
+                     \n\
+                     **Step 1 – Run the content search**\n\
+                     I'll call `mnem_search_content` with `query: \"{}\"` to find all snapshots that contain matching text, returning the file path, line content, and content hash.\n\
+                     \n\
+                     **Step 2 – Inspect matching snapshots**\n\
+                     For any interesting result, I can call `mnem_get_file_content` with the returned `content_hash` to view the full file at that point in time.\n\
+                     \n\
+                     **Step 3 – Restore if needed**\n\
+                     If a historical version is what you need, I can restore it with `mnem_restore_file_version`.\n\
+                     \n\
+                     Starting the search now.",
+                    query, query
+                )),
+            ]
+        }
+
+        "manage_project" => {
+            vec![
+                user_msg("Help me manage which projects Mnemosyne is tracking."),
+                assistant_msg(
+                    "I can help you manage your watched projects. Here are the available actions:\n\
+                     \n\
+                     **List all watched projects**\n\
+                     Call `mnem_list_projects` to see every project path currently tracked by the daemon.\n\
+                     \n\
+                     **Inspect a project's structure**\n\
+                     Call `mnem_get_project_structure` with a `project_path` (partial name is fine, e.g. `\"MyProject\"`) to get a semantic map of files and symbols.\n\
+                     \n\
+                     **Find symbols across a project**\n\
+                     Call `mnem_find_symbols` with a `query` and an optional `project_path` to locate functions, structs, or classes by name.\n\
+                     \n\
+                     Tell me what you'd like to do and I'll run the appropriate tool.",
+                ),
+            ]
+        }
+
+        _ => anyhow::bail!("Prompt '{}' not found", name),
+    };
+
+    Ok(json!({ "messages": messages }))
+}
+
+/// Builds a user-role MCP message.
+fn user_msg(text: &str) -> Value {
+    json!({ "role": "user", "content": { "type": "text", "text": text } })
+}
+
+/// Builds an assistant-role MCP message.
+fn assistant_msg(text: &str) -> Value {
+    json!({ "role": "assistant", "content": { "type": "text", "text": text } })
 }
