@@ -2,6 +2,7 @@
 
 # Mnemosyne Installation Script for macOS/Linux
 # This script downloads pre-compiled binaries from GitHub releases
+# Binaries are distributed as ZIP files containing both CLI and daemon
 
 set -e
 
@@ -72,6 +73,12 @@ if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
     exit 1
 fi
 
+if ! command -v unzip &> /dev/null; then
+    echo -e "${RED}❌ unzip command not found${NC}"
+    echo "Please install unzip first."
+    exit 1
+fi
+
 if command -v curl &> /dev/null; then
     RELEASE_INFO=$(curl -s "$LATEST_URL")
     VERSION=$(echo "$RELEASE_INFO" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
@@ -126,20 +133,16 @@ download_file() {
 BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
 # Download and extract binaries
-CLI_ARCHIVE="mnem-${PLATFORM}-${ARCH_SUFFIX}.tar.gz"
-DAEMON_ARCHIVE="mnem-daemon-${PLATFORM}-${ARCH_SUFFIX}.tar.gz"
-
-CLI_URL="${BASE_URL}/${CLI_ARCHIVE}"
-DAEMON_URL="${BASE_URL}/${DAEMON_ARCHIVE}"
+ARCHIVE="mnem-${PLATFORM}-${ARCH_SUFFIX}.zip"
+ARCHIVE_URL="${BASE_URL}/${ARCHIVE}"
 
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-CLI_TEMP="$TEMP_DIR/$CLI_ARCHIVE"
-DAEMON_TEMP="$TEMP_DIR/$DAEMON_ARCHIVE"
+ARCHIVE_TEMP="$TEMP_DIR/$ARCHIVE"
 
-# Download both binaries
-if ! download_file "$CLI_URL" "$CLI_TEMP" "mnem CLI"; then
+# Download the combined ZIP archive
+if ! download_file "$ARCHIVE_URL" "$ARCHIVE_TEMP" "Mnemosyne binaries"; then
     echo -e "${YELLOW}⚠️  Pre-compiled binaries not found for this platform${NC}"
     echo "You may need to compile from source:"
     echo "  git clone https://github.com/${REPO}.git"
@@ -148,19 +151,22 @@ if ! download_file "$CLI_URL" "$CLI_TEMP" "mnem CLI"; then
     exit 1
 fi
 
-download_file "$DAEMON_URL" "$DAEMON_TEMP" "mnem daemon"
-
 # Extract binaries
 echo -e "  Extracting binaries..."
 cd "$TEMP_DIR"
 
-if ! tar -xzf "$CLI_ARCHIVE" 2>/dev/null; then
-    echo -e "${RED}❌ Failed to extract ${CLI_ARCHIVE}${NC}"
+if ! unzip -q "$ARCHIVE" 2>/dev/null; then
+    echo -e "${RED}❌ Failed to extract ${ARCHIVE}${NC}"
+    echo "The downloaded file may be corrupted or invalid."
     exit 1
 fi
 
-if ! tar -xzf "$DAEMON_ARCHIVE" 2>/dev/null; then
-    echo -e "${RED}❌ Failed to extract ${DAEMON_ARCHIVE}${NC}"
+# Verify binaries exist
+if [ ! -f "mnem" ] || [ ! -f "mnem-daemon" ]; then
+    echo -e "${RED}❌ Required binaries not found in archive${NC}"
+    echo "Expected: mnem, mnem-daemon"
+    echo "Found:"
+    ls -la
     exit 1
 fi
 
