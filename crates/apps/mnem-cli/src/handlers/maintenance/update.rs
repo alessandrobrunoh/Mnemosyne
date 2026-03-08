@@ -202,10 +202,11 @@ fn install_unix(
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
 ) -> Result<()> {
+    use std::io::Read;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
-    let (cli_asset, daemon_asset) = find_unix_assets(&release.assets)?;
+    let zip_asset = find_unix_zip_asset(&release.assets)?;
 
     let install_dir = dirs::home_dir()
         .map(|p| p.join(".mnemosyne").join("bin"))
@@ -215,26 +216,66 @@ fn install_unix(
         std::fs::create_dir_all(&install_dir)?;
     }
 
-    let temp_dir = std::env::temp_dir();
-
-    layout.info("Downloading mnem CLI...");
-    let cli_bytes = client
-        .get(&cli_asset.browser_download_url)
+    layout.info(&format!("Downloading {}...", zip_asset.name));
+    let zip_bytes = client
+        .get(&zip_asset.browser_download_url)
         .send()?
         .bytes()?;
-    let cli_tmp = temp_dir.join(&cli_asset.name);
-    std::fs::write(&cli_tmp, &cli_bytes)?;
-
-    layout.info("Downloading mnem daemon...");
-    let daemon_bytes = client
-        .get(&daemon_asset.browser_download_url)
-        .send()?
-        .bytes()?;
-    let daemon_tmp = temp_dir.join(&daemon_asset.name);
-    std::fs::write(&daemon_tmp, &daemon_bytes)?;
 
     layout.success_bright("✓ Download complete!");
     layout.empty();
+
+    // Extract mnem and mnem-daemon from the zip into a temp dir.
+    let temp_dir = std::env::temp_dir().join("mnemosyne-update");
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)?;
+    }
+    std::fs::create_dir_all(&temp_dir)?;
+
+    let cursor = std::io::Cursor::new(&zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| anyhow::anyhow!("Failed to open zip archive: {}", e))?;
+
+    let required = ["mnem", "mnem-daemon"];
+    let mut extracted: Vec<std::path::PathBuf> = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| anyhow::anyhow!("Failed to read zip entry: {}", e))?;
+
+        let entry_name = entry.name().to_string();
+        let file_name = std::path::Path::new(&entry_name)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if required.contains(&file_name.as_str()) {
+            let dest = temp_dir.join(&file_name);
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)?;
+            std::fs::write(&dest, &buf)?;
+            layout.info(&format!("Extracted: {}", file_name));
+            extracted.push(dest);
+        }
+    }
+
+    let missing: Vec<&str> = required
+        .iter()
+        .filter(|&&name| {
+            !extracted
+                .iter()
+                .any(|p| p.file_name().map(|n| n == name).unwrap_or(false))
+        })
+        .copied()
+        .collect();
+
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "The following binaries were not found in the archive: {}",
+            missing.join(", ")
+        );
+    }
 
     // Stop the daemon before replacing the binaries.
     layout.info("Stopping daemon...");
@@ -245,10 +286,12 @@ fn install_unix(
     let target_cli = install_dir.join("mnem");
     let target_daemon = install_dir.join("mnem-daemon");
 
-    std::fs::rename(&cli_tmp, &target_cli)?;
-    std::fs::rename(&daemon_tmp, &target_daemon)?;
+    std::fs::rename(temp_dir.join("mnem"), &target_cli)?;
+    std::fs::rename(temp_dir.join("mnem-daemon"), &target_daemon)?;
     std::fs::set_permissions(&target_cli, std::fs::Permissions::from_mode(0o755))?;
     std::fs::set_permissions(&target_daemon, std::fs::Permissions::from_mode(0o755))?;
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 
     layout.success_bright("✓ Update installed successfully!");
     layout.empty();
@@ -258,26 +301,36 @@ fn install_unix(
 }
 
 #[cfg(unix)]
-fn find_unix_assets(assets: &[GitHubAsset]) -> Result<(&GitHubAsset, &GitHubAsset)> {
-    let cli_asset = assets
+fn find_unix_zip_asset(assets: &[GitHubAsset]) -> Result<&GitHubAsset> {
+    let platform = if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    };
+
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+
+    // Expected name: mnem-<platform>-<arch>.zip  e.g. mnem-macos-arm64.zip
+    assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
-            // Match standalone "mnem" or "mnem-<version>" but not "mnem-daemon"
-            name == "mnem"
-                || (name.starts_with("mnem-")
-                    && !name.contains("daemon")
-                    && !name.ends_with(".zip"))
+            name.starts_with("mnem-")
+                && name.contains(platform)
+                && name.contains(arch)
+                && name.ends_with(".zip")
         })
-        .ok_or_else(|| anyhow::anyhow!("CLI asset not found in release"))?;
-
-    let daemon_asset = assets
-        .iter()
-        .find(|a| {
-            let name = a.name.to_lowercase();
-            name.contains("mnem") && name.contains("daemon") && !name.ends_with(".zip")
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "ZIP asset not found in release for {}-{}. Expected mnem-{}-{}.zip",
+                platform,
+                arch,
+                platform,
+                arch
+            )
         })
-        .ok_or_else(|| anyhow::anyhow!("Daemon asset not found in release"))?;
-
-    Ok((cli_asset, daemon_asset))
 }

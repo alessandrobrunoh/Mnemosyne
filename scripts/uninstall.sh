@@ -41,11 +41,9 @@ esac
 if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
     if grep -q "Mnemosyne bin" "$CONFIG_FILE"; then
         echo -e "${BLUE}[*] Cleaning up $CONFIG_FILE...${NC}"
-        # Remove the lines added by the installer
-        # This is a bit tricky with sed, we'll just advise the user or do a simple removal
-        sed -i.bak '/# Mnemosyne bin/d' "$CONFIG_FILE"
-        sed -i.bak '/export PATH="\$PATH:'"$(echo $BIN_DIR | sed 's/\//\//g')"'"/d' "$CONFIG_FILE"
-        rm -f "${CONFIG_FILE}.bak"
+        # Remove the 3 lines added by the installer: blank line, comment, export
+        sed -i '' '/# Mnemosyne bin/{N;d;}' "$CONFIG_FILE"
+        sed -i '' '/export PATH=.*\.mnemosyne\/bin/d' "$CONFIG_FILE"
         echo -e "${GREEN}✓ Cleaned up $CONFIG_FILE.${NC}"
     fi
 fi
