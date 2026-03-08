@@ -2,7 +2,7 @@ use crate::commands::Command;
 use crate::ui::Layout;
 use anyhow::Result;
 use crossterm::style::Stylize;
-use mnem_core::{client::DaemonClient, protocol::methods, Repository};
+use mnem_core::{Repository, client::DaemonClient, protocol::methods};
 
 #[derive(Debug)]
 pub struct GcCommand;
@@ -37,13 +37,7 @@ impl Command for GcCommand {
                 pruned.bold()
             ));
         } else {
-            let repo = Repository::init()?;
-            let n = repo.run_gc()?;
-            layout.item_simple(&format!(
-                "{} Local cleanup complete: {} chunks pruned.",
-                "√".green(),
-                n.to_string().bold()
-            ));
+            layout.error("Daemon is NOT running. Please start it with 'mnem on'");
         }
         layout.section_end();
         Ok(())

@@ -120,6 +120,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 protocol::methods::MCP_START.to_string(),
                 protocol::methods::MCP_STOP.to_string(),
                 protocol::methods::MCP_STATUS.to_string(),
+                protocol::methods::MAINTENANCE_GC.to_string(),
             ];
             *state.server_capabilities.write() = Some(capabilities.clone());
 
@@ -1147,6 +1148,26 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     "transport": "stdio"
                 }),
             )
+        }
+
+        protocol::methods::MAINTENANCE_GC | protocol::methods::GC_RUN => {
+            let repos: Vec<std::sync::Arc<Repository>> =
+                state.repos.iter().map(|r| r.value().clone()).collect();
+
+            let mut total_pruned = 0usize;
+            for repo in repos {
+                match repo.run_gc() {
+                    Ok(pruned) => {
+                        total_pruned += pruned;
+                        info!("GC pruned {} chunks in {}", pruned, repo.project.path);
+                    }
+                    Err(e) => {
+                        error!("GC failed for {}: {}", repo.project.path, e);
+                    }
+                }
+            }
+
+            JsonRpcResponse::success(req.id, json!({ "pruned": total_pruned }))
         }
 
         _ => JsonRpcResponse::error(
