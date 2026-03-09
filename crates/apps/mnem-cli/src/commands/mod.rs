@@ -40,6 +40,10 @@ pub enum Commands {
         remove: bool,
         #[arg(short, long)]
         id: Option<String>,
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+        #[arg(short = 'P', long, default_value = "1")]
+        page: usize,
     },
     #[command(about = "View history", visible_alias = "history")]
     H {

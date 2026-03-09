@@ -51,9 +51,13 @@ fn main() -> Result<()> {
         Some(Commands::On { auto }) => commands::handle_on(auto, json),
         Some(Commands::Off {}) => commands::handle_off(json),
         Some(Commands::Status {}) => commands::handle_status(json),
-        Some(Commands::Track { list, remove, id }) => {
-            commands::handle_track(list, remove, id, json)
-        }
+        Some(Commands::Track {
+            list,
+            remove,
+            id,
+            limit,
+            page,
+        }) => commands::handle_track(list, remove, id, limit, page, json),
         Some(Commands::H {
             file,
             limit,
