@@ -44,3 +44,5 @@ bin/mnem
 bin/mnem-daemon
 
 .mnemosyne/
+
+Cargo.lock

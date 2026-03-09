@@ -1,16 +1,57 @@
 use anyhow::Result;
+use serde::Serialize;
+use serde_json::Value;
 use std::path::Component;
 
-use crate::handlers::files::history::compute_diff_stats;
-use crate::ui::Layout;
+use crate::ui::{Layout, Presentable};
 use mnem_core::client::DaemonClient;
 use mnem_core::protocol::SnapshotInfo;
 use mnem_core::protocol::methods;
 use mnem_core::storage::Repository;
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+
+#[derive(Serialize)]
+pub struct RestoreResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<Vec<SnapshotInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+impl Presentable for RestoreResponse {
+    fn render_tui(&self) -> Result<()> {
+        let layout = Layout::new();
+        if let Some(history) = &self.history {
+            if let Some(f) = &self.file {
+                layout.header_dashboard("RESTORE VERSIONS");
+                layout.section_branch("fi", f);
+                layout.item_simple(&format!("Found {} versions", history.len()));
+
+                // We don't have easy access to ide/repo here for TUI links in this structure,
+                // but we can at least show the list.
+                for (i, snap) in history.iter().enumerate() {
+                    let hash_short = &snap.content_hash[..8.min(snap.content_hash.len())];
+                    layout.row_history_compact(hash_short, "M", f, &snap.timestamp, i == 0, None);
+                }
+                layout.section_end();
+                layout.footer("Use 'mnem r <file> [version]' to restore");
+            }
+        } else if self.success {
+            layout.success(&self.message);
+        } else {
+            layout.error(&self.message);
+        }
+        Ok(())
+    }
+
+    fn render_json(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
+    }
+}
 
 /// Resolve the project root from an optional file argument.
 /// Looks for a `.mnemosyne/tracked` file walking upward from the file's parent dir.
@@ -92,77 +133,100 @@ pub fn handle_r(
     checkpoint: Option<String>,
     branch: Option<String>,
     limit: Option<usize>,
+    json: bool,
 ) -> Result<()> {
     use mnem_core::config::ConfigManager;
     use mnem_core::env::get_base_dir;
 
-    let layout = Layout::new();
     let base_dir = get_base_dir()?;
     let config = ConfigManager::new(&base_dir)?;
     let ide = config.config.ide;
 
     cleanup_old_temp_files();
 
-    // Resolve project path (filesystem check only, no DB open)
+    // Resolve project path
     let project_path = match get_project_from_file(&file) {
         Ok(p) => p,
         Err(_) => {
-            let cwd = std::env::current_dir()?;
-            layout.header_dashboard("PROJECT NOT TRACKED");
-            layout.section_branch("pr", "Project Folder");
-            layout.row_labeled("◫", "Current Dir", &cwd.to_string_lossy());
-            layout.section_end();
-            layout.empty();
-            layout.badge_error("ERROR", "This project is not tracked");
-            layout.info_bright("Run 'mnem track' to start tracking this project.");
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Project not tracked",
+                        "code": "PROJECT_NOT_TRACKED"
+                    })
+                );
+            } else {
+                let layout = Layout::new();
+                let cwd = std::env::current_dir()?;
+                layout.header_dashboard("PROJECT NOT TRACKED");
+                layout.section_branch("pr", "Project Folder");
+                layout.row_labeled("◫", "Current Dir", &cwd.to_string_lossy());
+                layout.section_end();
+                layout.empty();
+                layout.badge_error("ERROR", "This project is not tracked");
+                layout.info_bright("Run 'mnem track' to start tracking this project.");
+            }
             return Ok(());
         }
     };
 
-    // Try daemon first; fall back to direct DB only when daemon is not available.
     let daemon = DaemonClient::connect().ok();
-    // If daemon connection fails with IO error (stale socket), try direct DB
     let repo_opt: Option<Repository> = if daemon.is_none() {
         match Repository::open(base_dir.clone(), project_path.clone()) {
             Ok(r) => Some(r),
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("lock") || msg.contains("Database already open") {
-                    layout.error("Cannot access history while daemon is running.");
-                    layout.info_bright("Run 'mnem off' to stop the daemon first.");
-                    return Ok(());
-                }
-                return Err(anyhow::anyhow!("{}", e));
-            }
+            Err(_) => None,
         }
     } else {
         None
     };
 
-    // -----------------------------------------------------------------------
     // --checkpoint
-    // -----------------------------------------------------------------------
     if let Some(ref cp) = checkpoint {
-        if let Some(mut client) = daemon {
+        let message = if let Some(mut client) = daemon {
             let _ = client.call(
                 methods::PROJECT_REVERT_V1,
                 serde_json::json!({ "timestamp": cp }),
             )?;
-            layout.success(&format!("Restored project from checkpoint {}", cp));
+            format!("Restored project from checkpoint {}", cp)
         } else if let Some(repo) = repo_opt.as_ref() {
             let count = repo.revert_to_checkpoint(cp)?;
-            layout.success(&format!("Restored {} files from checkpoint {}", count, cp));
+            format!("Restored {} files from checkpoint {}", count, cp)
+        } else {
+            anyhow::bail!("Neither daemon nor local DB is available");
+        };
+
+        let response = RestoreResponse {
+            success: true,
+            message,
+            history: None,
+            file: None,
+        };
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+        } else {
+            response.render_tui()?;
         }
         return Ok(());
     }
 
-    // -----------------------------------------------------------------------
-    // File operations
-    // -----------------------------------------------------------------------
     let f = match file.as_ref() {
         Some(f) => f,
         None => {
-            layout.error("Specify a file: mnem r <file> [version]");
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Missing file path",
+                        "code": "MISSING_FILE"
+                    })
+                );
+            } else {
+                Layout::new().error("Specify a file: mnem r <file> [version]");
+            }
             return Ok(());
         }
     };
@@ -171,83 +235,13 @@ pub fn handle_r(
 
     // --list
     if list {
-        let full_path = if std::path::Path::new(f).is_absolute() {
-            normalize_path(f)
-        } else {
-            normalize_path(&project_path.join(f).to_string_lossy())
-        };
-
-        // Try daemon (fast path — no temp files needed)
-        if let Some(mut client) = daemon {
-            match client.call(
-                methods::SNAPSHOT_LIST,
-                serde_json::json!({ "file_path": full_path }),
-            ) {
-                Ok(res) => {
-                    match serde_json::from_value::<Vec<SnapshotInfo>>(res.clone()) {
-                        Ok(mut history) => {
-                            if let Some(ref br) = branch {
-                                history.retain(|s| s.git_branch.as_deref().unwrap_or("main") == br);
-                            }
-                            let max = limit.unwrap_or(50);
-                            history.truncate(max);
-
-                            layout.header_dashboard("RESTORE VERSIONS");
-                            layout.section_branch("fi", f);
-                            layout.item_simple(&format!("Found {} versions", history.len()));
-
-                            for (i, snap) in history.iter().enumerate() {
-                                let hash_short =
-                                    &snap.content_hash[..8.min(snap.content_hash.len())];
-                                layout.row_version_with_link(
-                                    i + 1,
-                                    hash_short,
-                                    &snap.content_hash,
-                                    &snap.file_path,
-                                    &snap.timestamp,
-                                    i == 0,
-                                    None,
-                                    &ide,
-                                );
-                            }
-                            layout.section_end();
-                            layout.footer("Use 'mnem r <file> [version]' to restore");
-                            return Ok(());
-                        }
-                        Err(parse_err) => {
-                            // Debug: show what we got from daemon
-                            layout.warning(&format!("Daemon parse error: {}", parse_err));
-                            layout.info(&format!("Raw response: {}", res));
-                        }
-                    }
-                }
-                Err(e) => {
-                    layout.warning(&format!("Daemon error: {e}"));
-                }
-            }
-        }
-
-        // Fallback: direct DB (daemon not running)
-        let repo = match repo_opt {
-            Some(r) => r,
-            None => {
-                layout.error("Cannot connect to daemon and cannot open local DB.");
-                return Ok(());
-            }
-        };
-
-        let mut history = match repo.get_history(clean_path) {
-            Ok(h) => h,
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("lock") || msg.contains("Database already open") {
-                    layout.error("Cannot access history while daemon is running.");
-                    layout.info_bright("Run 'mnem off' to stop the daemon first.");
-                    return Ok(());
-                }
-                return Err(anyhow::anyhow!("{}", e));
-            }
-        };
+        let mut history = get_history_for_restore(
+            daemon.as_ref().map(|_| ()),
+            repo_opt.as_ref(),
+            &project_path,
+            clean_path,
+            &mut DaemonClient::connect().ok(),
+        )?;
 
         if let Some(ref br) = branch {
             history.retain(|s| s.git_branch.as_deref().unwrap_or("main") == br);
@@ -256,122 +250,41 @@ pub fn handle_r(
         let max = limit.unwrap_or(50);
         history.truncate(max);
 
-        layout.header_dashboard("RESTORE VERSIONS");
-        layout.section_branch("fi", clean_path);
+        let response = RestoreResponse {
+            success: true,
+            message: format!("Found {} versions", history.len()),
+            history: Some(history),
+            file: Some(f.clone()),
+        };
 
-        if history.is_empty() {
-            layout.warning("No versions found.");
-            if let Some(ref br) = branch {
-                layout.info(&format!("No versions on branch '{}'", br));
-            }
-            layout.section_end();
-            return Ok(());
-        }
+        if json {
+            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+        } else {
+            // Complex TUI with links needs direct layout calls for now
+            let layout = Layout::new();
+            layout.header_dashboard("RESTORE VERSIONS");
+            layout.section_branch("fi", f);
+            layout.item_simple(&response.message);
 
-        let extension = std::path::Path::new(clean_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-
-        // Write temp files for IDE links (only in fallback / daemon-off path)
-        let mut temp_files: BTreeMap<String, String> = BTreeMap::new();
-        for snap in &history {
-            if let Ok(content) = repo.get_content(&snap.content_hash) {
-                let temp_filename = if !extension.is_empty() {
-                    format!(
-                        "{}_{}_mnem.{}",
-                        std::path::Path::new(clean_path)
-                            .file_stem()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("file"),
-                        &snap.content_hash[..8],
-                        extension
-                    )
-                } else {
-                    format!(
-                        "{}_{}_mnem.tmp",
-                        std::path::Path::new(clean_path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("file"),
-                        &snap.content_hash[..8]
-                    )
-                };
-                let temp_path = std::env::temp_dir().join(&temp_filename);
-
-                let should_write = match fs::read(&temp_path) {
-                    Ok(existing) => existing != content,
-                    Err(_) => true,
-                };
-
-                if should_write && fs::write(&temp_path, &content).is_ok() {
-                    temp_files.insert(
-                        snap.content_hash.clone(),
-                        temp_path.to_string_lossy().to_string(),
-                    );
-                } else if temp_path.exists() {
-                    temp_files.insert(
-                        snap.content_hash.clone(),
-                        temp_path.to_string_lossy().to_string(),
-                    );
-                }
-            }
-        }
-
-        let mut by_branch: BTreeMap<String, Vec<_>> = BTreeMap::new();
-        for snap in &history {
-            let br = snap
-                .git_branch
-                .clone()
-                .unwrap_or_else(|| "main".to_string());
-            by_branch.entry(br).or_default().push(snap);
-        }
-
-        for (branch_name, snaps) in &by_branch {
-            let icon = if branch_name == "main" { "ma" } else { "br" };
-            layout.section_branch(icon, branch_name);
-
-            for (i, snap) in snaps.iter().enumerate() {
+            for (i, snap) in response.history.as_ref().unwrap().iter().enumerate() {
                 let hash_short = &snap.content_hash[..8.min(snap.content_hash.len())];
-
-                let ts_string = snap.timestamp.to_string();
-                let date_time = if let Some(t_pos) = ts_string.find('T') {
-                    let time_part = &ts_string[t_pos + 1..];
-                    let time_trimmed = time_part.split('.').next().unwrap_or(time_part);
-                    format!("{} {}", &ts_string[..t_pos], time_trimmed)
-                } else {
-                    ts_string.clone()
-                };
-
-                let file_to_open = temp_files
-                    .get(&snap.content_hash)
-                    .cloned()
-                    .unwrap_or_else(|| project_path.join(clean_path).to_string_lossy().to_string());
-
-                let prev_hash = snaps.get(i + 1).map(|s| s.content_hash.as_str());
-                let diff_stats = compute_diff_stats(&repo, &snap.content_hash, prev_hash);
-
                 layout.row_version_with_link(
                     i + 1,
                     hash_short,
                     &snap.content_hash,
-                    &file_to_open,
-                    &date_time,
+                    &snap.file_path,
+                    &snap.timestamp,
                     i == 0,
-                    diff_stats,
+                    None,
                     &ide,
                 );
             }
             layout.section_end();
+            layout.footer("Use 'mnem r <file> [version]' to restore");
         }
-
-        layout.footer("Click on hash to open that version in IDE");
         return Ok(());
     }
 
-    // -----------------------------------------------------------------------
-    // Restore helpers (daemon-first)
-    // -----------------------------------------------------------------------
     let do_restore = |daemon_opt: Option<DaemonClient>,
                       repo_ref: Option<&Repository>,
                       hash: &str,
@@ -402,6 +315,8 @@ pub fn handle_r(
         Ok(())
     };
 
+    let mut message = String::new();
+
     // --undo
     if undo {
         let history = get_history_for_restore(
@@ -417,35 +332,24 @@ pub fn handle_r(
         let prev_hash = history[1].content_hash.clone();
         let prev_ts = history[1].timestamp.clone();
         do_restore(daemon, repo_opt.as_ref(), &prev_hash, None)?;
-        layout.success(&format!(
-            "Restored {} to version from {}",
-            clean_path, prev_ts
-        ));
-        return Ok(());
-    }
-
-    // --to <hash>
-    if let Some(ref hash) = to {
+        message = format!("Restored {} to version from {}", clean_path, prev_ts);
+    } else if let Some(ref hash) = to {
         do_restore(daemon, repo_opt.as_ref(), hash, symbol.as_ref())?;
-        if let Some(ref sym) = symbol {
-            layout.success(&format!(
+        message = if let Some(ref sym) = symbol {
+            format!(
                 "Restored symbol '{}' in {} to {}",
                 sym,
                 clean_path,
                 &hash[..8.min(hash.len())]
-            ));
+            )
         } else {
-            layout.success(&format!(
+            format!(
                 "Restored {} to {}",
                 clean_path,
                 &hash[..8.min(hash.len())]
-            ));
-        }
-        return Ok(());
-    }
-
-    // <version>
-    if let Some(v) = version {
+            )
+        };
+    } else if let Some(v) = version {
         let history = get_history_for_restore(
             daemon.as_ref().map(|_| ()),
             repo_opt.as_ref(),
@@ -458,26 +362,42 @@ pub fn handle_r(
         }
         let target_hash = history[v - 1].content_hash.clone();
         do_restore(daemon, repo_opt.as_ref(), &target_hash, symbol.as_ref())?;
-        if let Some(ref sym) = symbol {
-            layout.success(&format!(
+        message = if let Some(ref sym) = symbol {
+            format!(
                 "Restored symbol '{}' in {} to version {}",
                 sym, clean_path, v
-            ));
+            )
         } else {
-            layout.success(&format!("Restored {} to version {}", clean_path, v));
+            format!("Restored {} to version {}", clean_path, v)
+        };
+    } else {
+        // No action specified
+        if !json {
+            let layout = Layout::new();
+            layout.usage("r", "<file> [version]");
+            layout.info("Examples:");
+            layout.item_simple("mnem r main.rs --list");
+            layout.item_simple("mnem r main.rs --list --branch test");
+            layout.item_simple("mnem r main.rs --list --limit 10");
+            layout.item_simple("mnem r main.rs 3");
+            layout.item_simple("mnem r main.rs --undo");
+            layout.item_simple("mnem r main.rs --to <hash>");
         }
         return Ok(());
     }
 
-    // No action specified
-    layout.usage("r", "<file> [version]");
-    layout.info("Examples:");
-    layout.item_simple("mnem r main.rs --list");
-    layout.item_simple("mnem r main.rs --list --branch test");
-    layout.item_simple("mnem r main.rs --list --limit 10");
-    layout.item_simple("mnem r main.rs 3");
-    layout.item_simple("mnem r main.rs --undo");
-    layout.item_simple("mnem r main.rs --to <hash>");
+    let response = RestoreResponse {
+        success: true,
+        message,
+        history: None,
+        file: Some(f.clone()),
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+    } else {
+        response.render_tui()?;
+    }
 
     Ok(())
 }

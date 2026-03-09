@@ -1,22 +1,191 @@
 use anyhow::Result;
+use serde::Serialize;
+use serde_json::Value;
 
-use crate::ui::Layout;
+use crate::ui::{Layout, Presentable};
+use mnem_core::protocol::SymbolLocation;
+use mnem_core::models::SearchResult;
+
+#[derive(Serialize)]
+pub struct SearchResponse {
+    pub success: bool,
+    pub query: String,
+    pub semantic: bool,
+    pub results: SearchResults,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum SearchResults {
+    Semantic(Vec<SymbolLocation>),
+    Content(Vec<SearchResult>),
+}
+
+impl Presentable for SearchResponse {
+    fn render_tui(&self) -> Result<()> {
+        use crossterm::style::Stylize;
+        let layout = Layout::new();
+
+        match &self.results {
+            SearchResults::Semantic(locations) => {
+                layout.header("SYMBOL SEARCH");
+
+                if locations.is_empty() {
+                    layout.item_simple(&format!(
+                        "{}  No symbols found matching \"{}\"",
+                        "!".yellow(),
+                        self.query.clone().bold().white()
+                    ));
+                    return Ok(());
+                }
+
+                let mut grouped: std::collections::HashMap<String, Vec<SymbolLocation>> =
+                    std::collections::HashMap::new();
+                let mut file_order: Vec<String> = Vec::new();
+
+                for loc in locations {
+                    if !grouped.contains_key(&loc.file_path) {
+                        file_order.push(loc.file_path.clone());
+                    }
+                    grouped.entry(loc.file_path.clone()).or_default().push(loc.clone());
+                }
+
+                for path in file_order {
+                    let filename = std::path::Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.clone());
+
+                    let locs = grouped.get(&path).unwrap();
+                    layout.section_start("sy", &filename);
+                    layout.item_simple(&path.dark_grey().to_string());
+
+                    for loc in locs {
+                        println!(
+                            "┃   {} {} {} [{}-{}]",
+                            "•".cyan(),
+                            loc.kind.as_str().blue().bold(),
+                            loc.name.as_str().bold().white(),
+                            loc.start_line,
+                            loc.end_line
+                        );
+                    }
+                    layout.section_end();
+                }
+                layout.footer("Use 'mnem h --symbol <name>' to see version history of a symbol.");
+            }
+            SearchResults::Content(results) => {
+                layout.header("SEARCH RESULTS");
+
+                if results.is_empty() {
+                    layout.item_simple(&format!(
+                        "{}  No results found for \"{}\"",
+                        "!".yellow(),
+                        self.query.clone().bold().white()
+                    ));
+                    return Ok(());
+                }
+
+                layout.empty();
+
+                let mut files: Vec<String> = Vec::new();
+                for r in results {
+                    if !files.contains(&r.file_path) {
+                        files.push(r.file_path.clone());
+                    }
+                }
+
+                for file_path in &files {
+                    let filename = std::path::Path::new(file_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| file_path.clone());
+
+                    let matches_in_file: Vec<&SearchResult> = results
+                        .iter()
+                        .filter(|r| &r.file_path == file_path)
+                        .collect();
+
+                    layout.item_simple(&format!("{} {}", "📄".cyan(), filename.bold().white()));
+                    layout.item_simple(&file_path.clone().dark_grey().to_string());
+                    layout.empty();
+
+                    let mut hashes: Vec<String> = Vec::new();
+                    for r in &matches_in_file {
+                        if !hashes.contains(&r.content_hash) {
+                            hashes.push(r.content_hash.clone());
+                        }
+                    }
+
+                    for hash in &hashes {
+                        let matches_in_snap: Vec<&&SearchResult> = matches_in_file
+                            .iter()
+                            .filter(|r| &r.content_hash == hash)
+                            .collect();
+
+                        let first = matches_in_snap[0];
+                        let hash_short = &hash[..7.min(hash.len())];
+                        let branch = first.git_branch.as_deref().unwrap_or("?");
+                        let timestamp = chrono::DateTime::parse_from_rfc3339(&first.timestamp)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_else(|_| {
+                                first.timestamp[..16.min(first.timestamp.len())].replace('T', " ")
+                            });
+
+                        let styled_hash = hash_short.with(crate::ui::ACCENT).bold().to_string();
+                        let clickable_link = crate::ui::Hyperlink::action(&styled_hash, "open", hash);
+
+                        let meta = format!(
+                            "{}  {}  [{}]",
+                            timestamp.with(crossterm::style::Color::DarkGrey),
+                            branch.cyan().italic(),
+                            format!("{} match(es)", matches_in_snap.len())
+                        );
+                        layout.row_snapshot(&clickable_link, &meta);
+
+                        for m in matches_in_snap {
+                            let highlighted = highlight_match(&m.content, &self.query);
+                            println!(
+                                "┃   L{: >4}  {}",
+                                m.line_number.to_string().dark_grey(),
+                                highlighted
+                            );
+                        }
+                    }
+                    layout.empty();
+                }
+                layout.footer_hint("Click on hash to open that version in your IDE");
+            }
+        }
+        Ok(())
+    }
+
+    fn render_json(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
+    }
+}
 
 pub fn handle_s(
     query: Option<String>,
     file: Option<String>,
     limit: Option<usize>,
     semantic: bool,
+    json: bool,
 ) -> Result<()> {
-    use crate::ui;
-    use crossterm::style::Stylize;
     use mnem_core::{client::DaemonClient, protocol::methods};
 
-    let layout = Layout::new();
-
-    let query = match query {
-        Some(q) if !q.is_empty() => q,
-        _ => {
+    if query.is_none() || query.as_ref().unwrap().is_empty() {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "success": false,
+                    "error": "Missing query",
+                    "code": "MISSING_QUERY"
+                })
+            );
+        } else {
+            let layout = Layout::new();
             layout.usage("s", "<query> [--file <path>] [--limit <n>] [--semantic]");
             layout.empty();
             layout.item_simple("Options:");
@@ -27,82 +196,46 @@ pub fn handle_s(
             layout.item_simple("Examples:");
             layout.item_simple("  mnem s \"main\" --file main.rs");
             layout.item_simple("  mnem s \"UserRepository\" --semantic");
-            return Ok(());
         }
-    };
+        return Ok(());
+    }
 
+    let query = query.unwrap();
     let limit_val = limit.unwrap_or(50);
 
     let mut client = match DaemonClient::connect() {
         Ok(c) => c,
         Err(_) => {
-            layout.error("Daemon is not running. Start it with 'mnem on'");
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Daemon not running",
+                        "code": "DAEMON_NOT_RUNNING"
+                    })
+                );
+            } else {
+                Layout::new().error("Daemon is not running. Start it with 'mnem on'");
+            }
             return Ok(());
         }
     };
 
-    if semantic {
+    let results = if semantic {
         let res = client.call(
             methods::SYMBOL_SEARCH,
             serde_json::json!({ "query": query }),
         )?;
 
-        let mut locations: Vec<mnem_core::protocol::SymbolLocation> = serde_json::from_value(res)?;
+        let mut locations: Vec<SymbolLocation> = serde_json::from_value(res)?;
 
         if let Some(ref filter) = file {
             locations.retain(|l| l.file_path.contains(filter.as_str()));
         }
 
         locations.truncate(limit_val);
-
-        layout.header("SYMBOL SEARCH");
-
-        if locations.is_empty() {
-            layout.item_simple(&format!(
-                "{}  No symbols found matching \"{}\"",
-                "!".yellow(),
-                query.bold().white()
-            ));
-            return Ok(());
-        }
-
-        let mut grouped: std::collections::HashMap<
-            String,
-            Vec<mnem_core::protocol::SymbolLocation>,
-        > = std::collections::HashMap::new();
-        let mut file_order: Vec<String> = Vec::new();
-
-        for loc in locations {
-            if !grouped.contains_key(&loc.file_path) {
-                file_order.push(loc.file_path.clone());
-            }
-            grouped.entry(loc.file_path.clone()).or_default().push(loc);
-        }
-
-        for path in file_order {
-            let filename = std::path::Path::new(&path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.clone());
-
-            let locs = grouped.get(&path).unwrap();
-            layout.section_start("sy", &filename);
-            layout.item_simple(&path.dark_grey().to_string());
-
-            for loc in locs {
-                println!(
-                    "┃   {} {} {} [{}-{}]",
-                    "•".cyan(),
-                    loc.kind.as_str().blue().bold(),
-                    loc.name.as_str().bold().white(),
-                    loc.start_line,
-                    loc.end_line
-                );
-            }
-            layout.section_end();
-        }
-
-        layout.footer("Use 'mnem h --symbol <name>' to see version history of a symbol.");
+        SearchResults::Semantic(locations)
     } else {
         let res = client.call(
             methods::CONTENT_SEARCH_V1,
@@ -113,100 +246,22 @@ pub fn handle_s(
             }),
         )?;
 
-        let results: Vec<mnem_core::models::SearchResult> =
+        let results: Vec<SearchResult> =
             serde_json::from_value(res["results"].clone()).unwrap_or_default();
+        SearchResults::Content(results)
+    };
 
-        layout.header("SEARCH RESULTS");
+    let response = SearchResponse {
+        success: true,
+        query,
+        semantic,
+        results,
+    };
 
-        if results.is_empty() {
-            layout.item_simple(&format!(
-                "{}  No results found for \"{}\"{}",
-                "!".yellow(),
-                query.bold().white(),
-                file.as_ref()
-                    .map(|f| format!(" in files matching \"{}\"", f))
-                    .unwrap_or_default()
-            ));
-            return Ok(());
-        }
-
-        layout.empty();
-
-        let mut files: Vec<String> = Vec::new();
-        for r in &results {
-            if !files.contains(&r.file_path) {
-                files.push(r.file_path.clone());
-            }
-        }
-
-        for file_path in &files {
-            let filename = std::path::Path::new(file_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| file_path.clone());
-
-            let matches_in_file: Vec<&mnem_core::models::SearchResult> = results
-                .iter()
-                .filter(|r| &r.file_path == file_path)
-                .collect();
-
-            layout.item_simple(&format!("{} {}", "📄".cyan(), filename.bold().white()));
-            layout.item_simple(&file_path.clone().dark_grey().to_string());
-            layout.empty();
-
-            let mut hashes: Vec<String> = Vec::new();
-            for r in &matches_in_file {
-                if !hashes.contains(&r.content_hash) {
-                    hashes.push(r.content_hash.clone());
-                }
-            }
-
-            for hash in &hashes {
-                let matches_in_snap: Vec<&&mnem_core::models::SearchResult> = matches_in_file
-                    .iter()
-                    .filter(|r| &r.content_hash == hash)
-                    .collect();
-
-                let first = matches_in_snap[0];
-                let hash_short = &hash[..7.min(hash.len())];
-                let branch = first.git_branch.as_deref().unwrap_or("?");
-                let timestamp = chrono::DateTime::parse_from_rfc3339(&first.timestamp)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                    .unwrap_or_else(|_| {
-                        first.timestamp[..16.min(first.timestamp.len())].replace('T', " ")
-                    });
-
-                let styled_hash = hash_short.with(ui::ACCENT).bold().to_string();
-                let clickable_link = ui::Hyperlink::action(&styled_hash, "open", hash);
-
-                let meta = format!(
-                    "{}  {}  [{}]",
-                    timestamp.with(crossterm::style::Color::DarkGrey),
-                    branch.cyan().italic(),
-                    format!("{} match(es)", matches_in_snap.len())
-                );
-                layout.row_snapshot(&clickable_link, &meta);
-
-                for m in matches_in_snap {
-                    let highlighted = highlight_match(&m.content, &query);
-                    println!(
-                        "┃   L{: >4}  {}",
-                        m.line_number.to_string().dark_grey(),
-                        highlighted
-                    );
-                }
-            }
-            layout.empty();
-        }
-
-        if results.len() >= limit_val {
-            layout.item_simple(&format!(
-                "... showing first {}. Use --limit <n> to see more.",
-                limit_val
-            ));
-        }
-
-        layout.footer_hint("Click on hash to open that version in your IDE");
+    if json {
+        println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+    } else {
+        response.render_tui()?;
     }
 
     Ok(())

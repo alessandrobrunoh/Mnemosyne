@@ -1,4 +1,7 @@
 # Mnemosyne Uninstallation Script for Windows
+param (
+    [switch]$purge
+)
 $ErrorActionPreference = "Continue"
 
 Write-Host "--- Mnemosyne Uninstallation ---" -ForegroundColor Cyan
@@ -27,17 +30,30 @@ if ($CurrentPath -like "*$BinDir*") {
 }
 
 # 3. Remove files
-Write-Host "[*] Removing files in $InstallDir..." -ForegroundColor Blue
-if (Test-Path $InstallDir) {
-    try {
-        Remove-Item -Path $InstallDir -Recurse -Force
-        Write-Host "[+] Successfully removed $InstallDir." -ForegroundColor Green
-    } catch {
-        Write-Host "[!] Warning: Could not remove $InstallDir completely. Some files might be in use." -ForegroundColor Yellow
-        Write-Host "    Try closing all terminals and running this again." -ForegroundColor Gray
+if ($purge) {
+    Write-Host "[*] Purging all files in $InstallDir..." -ForegroundColor Blue
+    if (Test-Path $InstallDir) {
+        try {
+            Remove-Item -Path $InstallDir -Recurse -Force
+            Write-Host "[+] Successfully removed all Mnemosyne data." -ForegroundColor Green
+        } catch {
+            Write-Host "[!] Warning: Could not remove $InstallDir completely. Some files might be in use." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[-] $InstallDir not found." -ForegroundColor Gray
     }
 } else {
-    Write-Host "[-] $InstallDir not found." -ForegroundColor Gray
+    Write-Host "[*] Removing binaries in $BinDir..." -ForegroundColor Blue
+    if (Test-Path $BinDir) {
+        try {
+            Remove-Item -Path $BinDir -Recurse -Force
+            Write-Host "[+] Successfully removed binaries. Configuration and history preserved in $InstallDir." -ForegroundColor Green
+        } catch {
+            Write-Host "[!] Warning: Could not remove $BinDir completely." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[-] $BinDir not found." -ForegroundColor Gray
+    }
 }
 
 Write-Host ""

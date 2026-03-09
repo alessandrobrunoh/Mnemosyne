@@ -421,7 +421,7 @@ pub struct SymbolHistoryEntry {
     pub end_line: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolLocation {
     pub name: String,
     pub kind: String,
@@ -565,7 +565,7 @@ pub struct TierConfigGetResponse {
 
 // Responses
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub version: String,
     pub uptime_secs: u64,
@@ -586,7 +586,7 @@ pub struct StatusResponse {
     pub total_symbols: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotInfo {
     pub id: i64,
     pub file_path: String,

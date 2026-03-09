@@ -1,8 +1,9 @@
 use anyhow::Result;
-use serde::Deserialize;
-use std::io::Read;
+use serde::{Deserialize, Serialize};
 
 use crate::ui::Layout;
+use serde_json::Value;
+use crate::ui::Presentable;
 
 const GITHUB_REPO: &str = "alessandrobrunoh/Mnemosyne";
 
@@ -18,18 +19,61 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
-pub fn handle_update(check_only: bool) -> Result<()> {
+#[derive(Serialize)]
+pub struct UpdateResponse {
+    pub success: bool,
+    pub current_version: String,
+    pub latest_version: String,
+    pub update_available: bool,
+    pub message: String,
+    pub check_only: bool,
+}
+
+impl Presentable for UpdateResponse {
+    fn render_tui(&self) -> Result<()> {
+        let layout = Layout::new();
+        layout.header_dashboard("UPDATE STATUS");
+        layout.row_labeled("◆", "Current Version", &self.current_version);
+        layout.row_labeled("◆", "Latest Version", &self.latest_version);
+        layout.empty();
+
+        if self.update_available {
+            layout.warning(&format!("New version available: v{}", self.latest_version));
+            if self.check_only {
+                layout.info("Run 'mnem update' to install the new version");
+            } else if self.success {
+                layout.success_bright("✓ Update installed successfully!");
+                layout.info("Run 'mnem on' to start the daemon");
+            } else {
+                layout.error(&self.message);
+            }
+        } else {
+            layout.success_bright("✓ You are on the latest version!");
+        }
+        Ok(())
+    }
+
+    fn render_json(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
+    }
+}
+
+pub fn handle_update(check_only: bool, json: bool) -> Result<()> {
     let layout = Layout::new();
 
-    layout.header_dashboard("CHECKING FOR UPDATES");
-    layout.empty();
+    if !json {
+        layout.header_dashboard("CHECKING FOR UPDATES");
+        layout.empty();
+    }
 
     let current_version = env!("CARGO_PKG_VERSION");
-    layout.row_labeled("◆", "Current Version", current_version);
-    layout.empty();
-
-    layout.info("Checking GitHub for latest release...");
-    layout.empty();
+    
+    if !json {
+        layout.row_labeled("◆", "Current Version", current_version);
+        layout.empty();
+        layout.info("Checking GitHub for latest release...");
+        layout.empty();
+    }
 
     let client = reqwest::blocking::Client::builder()
         .user_agent("Mnemosyne-CLI")
@@ -42,38 +86,77 @@ pub fn handle_update(check_only: bool) -> Result<()> {
     let response = client.get(&url).send()?;
 
     if !response.status().is_success() {
-        layout.warning("Could not check for updates");
-        layout.info(&format!("GitHub API returned: {}", response.status()));
+        if json {
+            println!("{}", serde_json::json!({
+                "success": false,
+                "error": "Could not check for updates",
+                "http_status": response.status().as_u16()
+            }));
+        } else {
+            layout.warning("Could not check for updates");
+            layout.info(&format!("GitHub API returned: {}", response.status()));
+        }
         return Ok(());
     }
 
     let release: GitHubRelease = response.json()?;
     let latest_version = release.tag_name.trim_start_matches('v');
+    let update_available = latest_version != current_version;
 
-    layout.row_labeled("◆", "Latest Version", latest_version);
-    layout.empty();
+    let mut update_res = UpdateResponse {
+        success: true,
+        current_version: current_version.to_string(),
+        latest_version: latest_version.to_string(),
+        update_available,
+        message: if update_available { "New version available".to_string() } else { "Already on latest version".to_string() },
+        check_only,
+    };
 
-    if latest_version == current_version {
-        layout.success_bright("✓ You are on the latest version!");
-        layout.empty();
+    if !update_available || check_only {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&update_res.render_json()?)?);
+        } else {
+            update_res.render_tui()?;
+        }
         return Ok(());
     }
 
-    layout.warning(&format!("New version available: v{}", latest_version));
-    layout.empty();
+    let install_result = perform_installation(&layout, &client, &release, json);
 
-    if check_only {
-        layout.info("Run 'mnem update' to install the new version");
-        return Ok(());
+    match install_result {
+        Ok(_) => {
+            update_res.success = true;
+            update_res.message = "Update installed successfully".to_string();
+        }
+        Err(e) => {
+            update_res.success = false;
+            update_res.message = format!("Installation failed: {}", e);
+        }
     }
 
-    #[cfg(windows)]
-    install_windows(&layout, &client, &release)?;
-
-    #[cfg(unix)]
-    install_unix(&layout, &client, &release)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&update_res.render_json()?)?);
+    } else {
+        update_res.render_tui()?;
+    }
 
     Ok(())
+}
+
+fn perform_installation(
+    layout: &Layout,
+    client: &reqwest::blocking::Client,
+    release: &GitHubRelease,
+    json: bool,
+) -> Result<()> {
+    #[cfg(windows)]
+    {
+        install_windows(layout, client, release, json)
+    }
+    #[cfg(not(windows))]
+    {
+        install_unix(layout, client, release, json)
+    }
 }
 
 #[cfg(windows)]
@@ -81,7 +164,9 @@ fn install_windows(
     layout: &crate::ui::Layout,
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
+    json: bool,
 ) -> Result<()> {
+    use std::io::Read;
     // The Windows release ships as a single zip archive.
     let zip_asset = release
         .assets
@@ -98,15 +183,19 @@ fn install_windows(
             )
         })?;
 
-    layout.info(&format!("Downloading {}...", zip_asset.name));
+    if !json {
+        layout.info(&format!("Downloading {}...", zip_asset.name));
+    }
 
     let zip_bytes = client
         .get(&zip_asset.browser_download_url)
         .send()?
         .bytes()?;
 
-    layout.success_bright("✓ Download complete!");
-    layout.empty();
+    if !json {
+        layout.success_bright("✓ Download complete!");
+        layout.empty();
+    }
 
     // Extract mnem.exe and mnem-daemon.exe from the zip into a temp dir.
     let temp_dir = std::env::temp_dir().join("mnemosyne-update");
@@ -138,7 +227,9 @@ fn install_windows(
             let mut buf = Vec::new();
             entry.read_to_end(&mut buf)?;
             std::fs::write(&dest, &buf)?;
-            layout.info(&format!("Extracted: {}", file_name));
+            if !json {
+                layout.info(&format!("Extracted: {}", file_name));
+            }
             extracted.push(dest);
         }
     }
@@ -176,31 +267,36 @@ fn install_windows(
         let file_name = src.file_name().unwrap().to_string_lossy();
         let dest_new = install_dir.join(format!("{}.new", file_name));
         std::fs::copy(src, &dest_new)?;
-        layout.info(&format!("Staged: {}", dest_new.display()));
+        if !json {
+            layout.info(&format!("Staged: {}", dest_new.display()));
+        }
     }
 
     // Clean up temp dir.
     let _ = std::fs::remove_dir_all(&temp_dir);
 
-    layout.empty();
-    layout.success_bright("✓ Update staged successfully!");
-    layout.empty();
-    layout.warning("To complete the update, run the following commands:");
-    layout.info("  1. mnem off");
-    layout.info("  2. In your install directory, rename each .new file:");
-    for name in &required {
-        layout.info(&format!("       Rename-Item '{0}.new' '{0}'", name));
+    if !json {
+        layout.empty();
+        layout.success_bright("✓ Update staged successfully!");
+        layout.empty();
+        layout.warning("To complete the update, run the following commands:");
+        layout.info("  1. mnem off");
+        layout.info("  2. In your install directory, rename each .new file:");
+        for name in &required {
+            layout.info(&format!("       Rename-Item '{0}.new' '{0}'", name));
+        }
+        layout.info("  3. mnem on");
     }
-    layout.info("  3. mnem on");
 
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(not(windows))]
 fn install_unix(
     layout: &crate::ui::Layout,
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
+    json: bool,
 ) -> Result<()> {
     use std::io::Read;
     use std::os::unix::fs::PermissionsExt;
@@ -216,14 +312,18 @@ fn install_unix(
         std::fs::create_dir_all(&install_dir)?;
     }
 
-    layout.info(&format!("Downloading {}...", zip_asset.name));
+    if !json {
+        layout.info(&format!("Downloading {}...", zip_asset.name));
+    }
     let zip_bytes = client
         .get(&zip_asset.browser_download_url)
         .send()?
         .bytes()?;
 
-    layout.success_bright("✓ Download complete!");
-    layout.empty();
+    if !json {
+        layout.success_bright("✓ Download complete!");
+        layout.empty();
+    }
 
     // Extract mnem and mnem-daemon from the zip into a temp dir.
     let temp_dir = std::env::temp_dir().join("mnemosyne-update");
@@ -255,7 +355,9 @@ fn install_unix(
             let mut buf = Vec::new();
             entry.read_to_end(&mut buf)?;
             std::fs::write(&dest, &buf)?;
-            layout.info(&format!("Extracted: {}", file_name));
+            if !json {
+                layout.info(&format!("Extracted: {}", file_name));
+            }
             extracted.push(dest);
         }
     }
@@ -278,7 +380,9 @@ fn install_unix(
     }
 
     // Stop the daemon before replacing the binaries.
-    layout.info("Stopping daemon...");
+    if !json {
+        layout.info("Stopping daemon...");
+    }
     let current_exe = std::env::current_exe()
         .map_err(|e| anyhow::anyhow!("Could not find current executable: {}", e))?;
     let _ = Command::new(&current_exe).arg("off").output();
@@ -293,14 +397,16 @@ fn install_unix(
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 
-    layout.success_bright("✓ Update installed successfully!");
-    layout.empty();
-    layout.info("Run 'mnem on' to start the daemon");
+    if !json {
+        layout.success_bright("✓ Update installed successfully!");
+        layout.empty();
+        layout.info("Run 'mnem on' to start the daemon");
+    }
 
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(not(windows))]
 fn find_unix_zip_asset(assets: &[GitHubAsset]) -> Result<&GitHubAsset> {
     let platform = if cfg!(target_os = "macos") {
         "macos"

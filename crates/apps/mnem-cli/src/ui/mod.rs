@@ -22,6 +22,7 @@
 pub mod colors;
 pub mod highlight;
 pub mod layout;
+pub mod presentable;
 
 // Re-export highlighting
 pub use highlight::TsHighlighter;
@@ -31,6 +32,9 @@ pub use colors::*;
 
 // Re-export layout system
 pub use layout::{Layout, LayoutBuilder};
+
+// Re-export presentable trait
+pub use presentable::Presentable;
 
 // Re-export UI components and elements for convenience
 pub use crate::ui_components::{Elements, Hyperlink, List, Messages, Status};

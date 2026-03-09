@@ -1,29 +1,34 @@
 use anyhow::Result;
 
-use crate::ui::Layout;
+use crate::ui::presentable::SimpleResponse;
+use crate::ui::Presentable;
 
-pub fn handle_on(_auto: bool) -> Result<()> {
+pub fn handle_on(_auto: bool, json: bool) -> Result<()> {
     use mnem_core::client;
 
-    let layout = Layout::new();
+    let response = match client::ensure_daemon() {
+        Ok(true) => SimpleResponse {
+            success: true,
+            message: "mnem daemon started".to_string(),
+            code: Some("DAEMON_STARTED".to_string()),
+        },
+        Ok(false) => SimpleResponse {
+            success: true,
+            message: "mnem daemon is already running".to_string(),
+            code: Some("DAEMON_ALREADY_RUNNING".to_string()),
+        },
+        Err(e) => SimpleResponse {
+            success: false,
+            message: format!("Failed to start daemon: {}", e),
+            code: Some("DAEMON_START_FAILED".to_string()),
+        },
+    };
 
-    match client::ensure_daemon() {
-        Ok(true) => {
-            layout.header_dashboard("DAEMON");
-            layout.success_bright("✓ mnem daemon started");
-            layout.empty();
-            layout.badge_success("READY", "Mnemosyne is now running");
-        }
-        Ok(false) => {
-            layout.header_dashboard("DAEMON");
-            layout.info_bright("● mnem daemon is already running");
-            layout.empty();
-            layout.badge_info("INFO", "Daemon was already active");
-        }
-        Err(e) => {
-            layout.header_dashboard("DAEMON");
-            layout.error_bright(&format!("✗ Failed to start daemon: {}", e));
-        }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+    } else {
+        response.render_tui()?;
     }
+
     Ok(())
 }

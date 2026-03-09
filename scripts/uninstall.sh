@@ -13,6 +13,11 @@ NC='\033[0m' # No Color
 INSTALL_DIR="$HOME/.mnemosyne"
 BIN_DIR="$INSTALL_DIR/bin"
 
+PURGE=false
+if [ "$1" == "--purge" ]; then
+    PURGE=true
+fi
+
 echo -e "${RED}--- Mnemosyne Uninstallation ---${NC}"
 
 # 1. Stop processes
@@ -22,12 +27,22 @@ pkill -9 mnem-daemon 2>/dev/null || true
 sleep 1
 
 # 2. Remove files
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${BLUE}[*] Removing $INSTALL_DIR...${NC}"
-    rm -rf "$INSTALL_DIR"
-    echo -e "${GREEN}✓ Removed files.${NC}"
+if [ "$PURGE" = true ]; then
+    if [ -d "$INSTALL_DIR" ]; then
+        echo -e "${BLUE}[*] Purging everything in $INSTALL_DIR...${NC}"
+        rm -rf "$INSTALL_DIR"
+        echo -e "${GREEN}✓ Removed all files and configuration.${NC}"
+    else
+        echo -e "${YELLOW}[!] $INSTALL_DIR not found.${NC}"
+    fi
 else
-    echo -e "${YELLOW}[!] $INSTALL_DIR not found.${NC}"
+    if [ -d "$BIN_DIR" ]; then
+        echo -e "${BLUE}[*] Removing binaries in $BIN_DIR...${NC}"
+        rm -rf "$BIN_DIR"
+        echo -e "${GREEN}✓ Removed binaries. Configuration and history preserved in $INSTALL_DIR.${NC}"
+    else
+        echo -e "${YELLOW}[!] $BIN_DIR not found.${NC}"
+    fi
 fi
 
 # 3. Clean up PATH (optional, but good practice)

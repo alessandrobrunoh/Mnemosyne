@@ -19,6 +19,9 @@ struct Cli {
 
     #[arg(short, long, global = true)]
     project: Option<PathBuf>,
+
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 fn styles() -> clap::builder::Styles {
@@ -111,8 +114,20 @@ enum Commands {
         #[arg(long)]
         reset: bool,
     },
+    #[command(about = "Git operations")]
+    Git {
+        #[arg(long)]
+        commits: bool,
+        #[arg(long)]
+        log: bool,
+        #[arg(long)]
+        hook: bool,
+    },
     #[command(about = "Uninstall mnem")]
-    Uninstall {},
+    Uninstall {
+        #[arg(long)]
+        purge: bool,
+    },
     #[command(about = "Check for updates and update")]
     Update {
         #[arg(long)]
@@ -135,18 +150,20 @@ fn main() -> Result<()> {
         std::env::set_current_dir(project_path)?;
     }
 
+    let json = cli.json;
+
     match cli.command {
-        Some(Commands::On { auto }) => handlers::handle_on(auto),
-        Some(Commands::Off {}) => handlers::handle_off(),
-        Some(Commands::Status {}) => handlers::handle_status(),
-        Some(Commands::Track { list, remove, id }) => handlers::handle_track(list, remove, id),
+        Some(Commands::On { auto }) => handlers::handle_on(auto, json),
+        Some(Commands::Off {}) => handlers::handle_off(json),
+        Some(Commands::Status {}) => handlers::handle_status(json),
+        Some(Commands::Track { list, remove, id }) => handlers::handle_track(list, remove, id, json),
         Some(Commands::H {
             file,
             limit,
             timeline,
             since,
             branch,
-        }) => handlers::handle_h(file, limit, timeline, since, branch),
+        }) => handlers::handle_h(file, limit, timeline, since, branch, json),
         Some(Commands::R {
             file,
             version,
@@ -158,26 +175,27 @@ fn main() -> Result<()> {
             branch,
             limit,
         }) => handlers::handle_r(
-            file, version, list, undo, to, symbol, checkpoint, branch, limit,
+            file, version, list, undo, to, symbol, checkpoint, branch, limit, json,
         ),
         Some(Commands::S {
             query,
             file,
             limit,
             semantic,
-        }) => handlers::handle_s(query, file, limit, semantic),
-        Some(Commands::Info { project }) => handlers::handle_info(project),
+        }) => handlers::handle_s(query, file, limit, semantic, json),
+        Some(Commands::Info { project }) => handlers::handle_info(project, json),
         Some(Commands::Gc {
             keep,
             dry_run,
             aggressive,
-        }) => handlers::handle_gc(keep, dry_run, aggressive),
-        Some(Commands::Config { get, set, reset }) => handlers::handle_config(get, set, reset),
-        Some(Commands::Uninstall {}) => handlers::handle_uninstall(),
-        Some(Commands::Update { check_only }) => handlers::handle_update(check_only),
-        Some(Commands::McpStart {}) => handlers::handle_mcp("start"),
-        Some(Commands::McpStop {}) => handlers::handle_mcp("stop"),
-        Some(Commands::McpStatus {}) => handlers::handle_mcp("status"),
-        None => handlers::handle_status(),
+        }) => handlers::handle_gc(keep, dry_run, aggressive, json),
+        Some(Commands::Config { get, set, reset }) => handlers::handle_config(get, set, reset, json),
+        Some(Commands::Git { commits, log, hook }) => handlers::handle_git(commits, log, hook, json),
+        Some(Commands::Uninstall { purge }) => handlers::handle_uninstall(purge, json),
+        Some(Commands::Update { check_only }) => handlers::handle_update(check_only, json),
+        Some(Commands::McpStart {}) => handlers::handle_mcp("start", json),
+        Some(Commands::McpStop {}) => handlers::handle_mcp("stop", json),
+        Some(Commands::McpStatus {}) => handlers::handle_mcp("status", json),
+        None => handlers::handle_status(json),
     }
 }
