@@ -23,26 +23,47 @@ pub struct ProjectInfo {
 impl Presentable for TrackResponse {
     fn render_tui(&self) -> Result<()> {
         let layout = Layout::new();
+        let theme = layout.theme();
 
         if !self.projects.is_empty() {
-            layout.header_dashboard("TRACKED PROJECTS");
+            layout.graph_branch_start("workspace: tracked projects");
             for p in &self.projects {
-                layout.bullet_purple(&p.name);
-                layout.row_file_path(&p.path);
+                layout.graph_node(
+                    &p.id,
+                    &p.name,
+                    false,
+                    "active",
+                    Some("•"),
+                    theme.timeline_purple
+                );
+                layout.graph_file_change(&p.path, "root");
             }
-            layout.section_end();
-        }
-
-        if let Some(current) = &self.current {
-            layout.header_dashboard("PROJECT TRACKED");
-            layout.success_bright(&format!("✓ Now tracking: {}", current.name));
-            layout.empty();
-            layout.row_labeled("◫", "Path", &current.path);
-            layout.row_labeled("◆", "ID", &current.id);
+            layout.graph_branch_end();
+        } else if let Some(current) = &self.current {
+            layout.graph_branch_start("workspace: project tracking");
+            layout.graph_node(
+                &current.id,
+                &current.name,
+                true,
+                "now tracking",
+                Some("✓"),
+                theme.success_bright
+            );
+            layout.graph_file_change(&current.path, "root");
+            layout.graph_branch_end();
             layout.empty();
             layout.badge_success("OK", &self.message);
-        } else if self.projects.is_empty() {
-            layout.warning("No tracked projects.");
+        } else {
+            layout.graph_branch_start("workspace");
+            layout.graph_node(
+                "EMPTY",
+                "STATUS",
+                false,
+                "no projects",
+                None,
+                theme.text_dim
+            );
+            layout.graph_branch_end();
             layout.empty();
             layout.info("Use 'mnem track' in a project directory to start tracking");
         }

@@ -853,11 +853,12 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             if let Some(repo) = target_repo_arc {
                 let total_snapshots = repo.db.get_snapshot_count().unwrap_or(0);
-                let total_files = repo
+                let recent_files = repo
                     .db
                     .get_recent_files(1000, None, None)
-                    .unwrap_or_default()
-                    .len();
+                    .unwrap_or_default();
+                let total_files = recent_files.len();
+                
                 let last_activity = repo
                     .db
                     .get_global_history(1)
@@ -865,18 +866,21 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     .and_then(|h| h.first().map(|sn| sn.timestamp.clone()))
                     .unwrap_or_default();
 
+                let extensions = repo.db.get_extension_distribution().unwrap_or_default();
+                let size_bytes = repo.get_project_size().unwrap_or(0);
+
                 let resp = protocol::ProjectStatisticsResponse {
                     total_snapshots,
                     total_files,
                     total_branches: repo.list_branches().unwrap_or_default().len(),
-                    total_commits: 0,
-                    size_bytes: 0,
+                    total_commits: repo.db.get_commit_count().unwrap_or(0),
+                    size_bytes,
                     last_activity,
                     activity_by_day: Vec::new(),
                     activity_by_hour: Vec::new(),
                     top_files: Vec::new(),
                     top_branches: Vec::new(),
-                    extensions: Vec::new(),
+                    extensions,
                 };
                 return JsonRpcResponse::success(
                     req.id,

@@ -121,7 +121,7 @@ impl Presentable for ActivityGraph {
                 meta
             };
 
-            layout.graph_node(hash, &display_meta, is_latest, &time, icon, color);
+            layout.graph_node(hash, &display_meta, is_latest, &time, Some(icon), color);
         }
 
         // 4. Draw Root (Base)

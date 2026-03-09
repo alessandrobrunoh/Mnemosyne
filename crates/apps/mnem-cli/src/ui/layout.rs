@@ -774,20 +774,25 @@ impl Layout {
         );
     }
 
-    pub fn graph_node(&self, hash: &str, meta: &str, is_latest: bool, time: &str, icon: &str, color: crossterm::style::Color) {
+    pub fn graph_node(&self, hash: &str, meta: &str, is_latest: bool, time: &str, icon: Option<&str>, color: crossterm::style::Color) {
         let dot = if is_latest {
             "●".with(self.theme.success_bright)
         } else {
             "●".with(self.theme.text_dim)
         };
 
+        let icon_str = if let Some(i) = icon {
+            format!("{: <2} ", i.with(color).bold())
+        } else {
+            String::new()
+        };
+
         println!(
-            "{} {} {: <2} {: <8} {: <40} {}",
+            "{} {} {: <8} {: <40} {}",
             "  ┊".with(self.theme.text_bright),
             dot,
-            icon.with(color).bold(),
             hash.with(self.theme.timeline_cyan).bold(),
-            meta.with(self.theme.text),
+            format!("{}{}", icon_str, meta.with(self.theme.text)),
             time.with(self.theme.text_dim).italic()
         );
     }

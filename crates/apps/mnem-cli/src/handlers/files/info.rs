@@ -24,25 +24,62 @@ pub struct ProjectInfoResponse {
 impl Presentable for ProjectInfoResponse {
     fn render_tui(&self) -> Result<()> {
         let layout = Layout::new();
-        layout.header_dashboard("PROJECT INFO");
-        layout.section_branch("pr", &self.name);
-        layout.row_labeled("◫", "Path", &self.path);
-        layout.row_labeled("◆", "ID", &self.id);
-        layout.row_metric(
-            "",
-            "Size",
-            &format!("{:.2} MB", self.size_bytes as f64 / 1024.0 / 1024.0),
+        let theme = layout.theme();
+
+        layout.graph_branch_start(&format!("project: {}", self.name));
+        
+        // 1. Core Info
+        layout.graph_node(
+            &self.id,
+            "ID",
+            true,
+            "tracked",
+            None,
+            theme.success_bright
         );
-        layout.section_end();
+        layout.graph_node(
+            &self.path,
+            "PATH",
+            false,
+            "root",
+            None,
+            theme.text_dim
+        );
 
-        layout.section_branch("st", "Activity Summary");
-        layout.row_metric("", "Total Snapshots", &self.total_snapshots.to_string());
-        layout.row_metric("", "Unique Files", &self.total_files.to_string());
-        layout.row_metric("", "Branches", &self.total_branches.to_string());
-        layout.section_end();
+        layout.graph_connector();
 
+        // 2. Activity Summary
+        layout.graph_block_header("📊", "activity", theme.timeline_purple);
+        layout.graph_node(
+            &self.total_snapshots.to_string(),
+            "SNAPSHOTS",
+            false,
+            "total",
+            None,
+            theme.text_dim
+        );
+        layout.graph_node(
+            &self.total_files.to_string(),
+            "UNIQUE FILES",
+            false,
+            "total",
+            None,
+            theme.text_dim
+        );
+        layout.graph_node(
+            &self.total_branches.to_string(),
+            "BRANCHES",
+            false,
+            "total",
+            None,
+            theme.text_dim
+        );
+
+        layout.graph_connector();
+
+        // 3. File Types
         if !self.extensions.is_empty() {
-            layout.section_branch("fi", "File Types");
+            layout.graph_block_header("📂", "file types", theme.timeline_cyan);
             let mut top_types: Vec<_> = self.extensions.iter().collect();
             top_types.sort_by(|a, b| b.1.cmp(a.1));
 
@@ -60,16 +97,18 @@ impl Presentable for ProjectInfoResponse {
                     "txt" => "📄",
                     _ => "📄",
                 };
-                layout.row_key_value(
-                    &format!("{} .{}", icon, ext),
+                layout.graph_node(
                     &format!("{} files", count),
+                    &format!(".{}", ext),
+                    false,
+                    "count",
+                    Some(icon),
+                    theme.text_dim
                 );
             }
-            layout.section_end();
         }
 
-        layout.empty();
-        layout.badge_success("OK", &format!("Project loaded from {}", self.source));
+        layout.graph_branch_end();
         Ok(())
     }
 
@@ -147,40 +186,22 @@ pub fn handle_info(_project: Option<String>, json: bool) -> Result<()> {
                 }));
             } else {
                 let layout = Layout::new();
+                layout.graph_branch_start("project: Mnemosyne");
                 if msg.contains("lock") || msg.contains("Database already open") {
-                    layout.header_dashboard("PROJECT LOCKED");
-                    layout.section_branch("pr", "Current Folder");
-                    layout.row_labeled("◫", "Path", &cwd.to_string_lossy());
-                    layout.section_end();
-                    layout.empty();
-                    layout.badge_error("ERROR", "Daemon is running");
-                    layout.info_bright(
-                        "Run 'mnem off' to access directly, or the daemon is actively tracking this project.",
-                    );
+                    layout.graph_node("LOCKED", "STATUS", false, "daemon running", None, crossterm::style::Color::Yellow);
                 } else if !tracked_file.exists() {
-                    layout.header_dashboard("PROJECT NOT TRACKED");
-                    layout.section_branch("pr", "Current Folder");
-                    layout.row_labeled("◫", "Path", &cwd.to_string_lossy());
-                    layout.section_end();
-                    layout.empty();
-                    layout.badge_error("ERROR", "This project is not tracked");
-                    layout.info_bright("Run 'mnem track' to start tracking this project.");
+                    layout.graph_node("NOT TRACKED", "STATUS", false, "untracked", None, crossterm::style::Color::Red);
                 } else {
-                    layout.header_dashboard("PROJECT ERROR");
-                    layout.section_branch("pr", "Current Folder");
-                    layout.row_labeled("◫", "Path", &cwd.to_string_lossy());
-                    layout.section_end();
-                    layout.empty();
-                    layout.badge_error("ERROR", &msg);
+                    layout.graph_node("ERROR", "STATUS", false, &msg, None, crossterm::style::Color::Red);
                 }
+                layout.graph_branch_end();
             }
             return Ok(());
         }
     };
 
     let history = repo.get_recent_activity(1000)?;
-    let files: Vec<_> = history.iter().map(|s| &s.file_path).collect();
-    let unique_files: std::collections::HashSet<_> = files.iter().collect();
+    let unique_files: std::collections::HashSet<_> = history.iter().map(|s| &s.file_path).collect();
     let size = repo.get_project_size()?;
 
     let mut extensions: HashMap<String, usize> = HashMap::new();

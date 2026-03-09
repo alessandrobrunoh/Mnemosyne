@@ -19,38 +19,73 @@ fn format_duration(secs: u64) -> String {
 impl Presentable for StatusResponse {
     fn render_tui(&self) -> Result<()> {
         let layout = Layout::new();
-        layout.header_dashboard("MNEMOSYNE STATUS");
+        let theme = layout.theme();
 
-        layout.section_branch("da", "Daemon Status");
-        layout.row_labeled("", "Running", "Active");
-        layout.row_metric("", "Version", &self.version);
-        layout.row_metric("", "Watched", &self.watched_projects.len().to_string());
-        layout.row_metric("", "Uptime", &format_duration(self.uptime_secs));
-        layout.row_metric(
-            "",
-            "Storage",
-            &format!(
-                "{:.2} MB",
-                self.history_size_bytes as f64 / 1024.0 / 1024.0
-            ),
+        layout.graph_branch_start("daemon: Mnemosyne");
+        
+        // 1. Core Info
+        layout.graph_node(
+            &self.version,
+            "VERSION",
+            true,
+            "running",
+            None,
+            theme.success_bright
         );
-        layout.row_metric(
-            "",
-            "Avg Response",
+        
+        let uptime = format_duration(self.uptime_secs);
+        layout.graph_node(
+            &uptime,
+            "UPTIME",
+            false,
+            "active",
+            None,
+            theme.text_dim
+        );
+
+        layout.graph_connector();
+
+        // 2. Performance
+        layout.graph_block_header("⚡", "performance", theme.timeline_purple);
+        layout.graph_node(
             &format!("{:.2} ms", self.avg_response_time_ms),
+            "AVG RESPONSE",
+            false,
+            "stable",
+            None,
+            theme.text_dim
         );
-        layout.row_metric(
-            "",
-            "Avg Save",
+        layout.graph_node(
             &format!("{:.2} ms", self.avg_save_time_ms),
+            "AVG SAVE",
+            false,
+            "stable",
+            None,
+            theme.text_dim
         );
-        layout.row_metric("", "Total Saves", &self.total_saves.to_string());
-        layout.row_metric("", "Snapshots", &self.total_snapshots.to_string());
-        layout.row_metric("", "Symbols", &self.total_symbols.to_string());
-        layout.section_end();
 
-        layout.empty();
-        layout.badge_success("READY", "Mnemosyne is running");
+        layout.graph_connector();
+
+        // 3. Storage
+        layout.graph_block_header("💾", "storage", theme.timeline_cyan);
+        layout.graph_node(
+            &format!("{:.2} MB", self.history_size_bytes as f64 / 1024.0 / 1024.0),
+            "DB SIZE",
+            false,
+            "active",
+            None,
+            theme.text_dim
+        );
+        layout.graph_node(
+            &self.total_snapshots.to_string(),
+            "SNAPSHOTS",
+            false,
+            "indexed",
+            None,
+            theme.text_dim
+        );
+
+        layout.graph_branch_end();
         Ok(())
     }
 
@@ -86,13 +121,18 @@ pub fn handle_status(json: bool) -> Result<()> {
                 );
             } else {
                 let layout = Layout::new();
-                layout.header_dashboard("MNEMOSYNE STATUS");
-                layout.section_branch("da", "Daemon Status");
-                layout.row_labeled("", "Running", "Inactive");
-                layout.section_end();
+                layout.graph_branch_start("daemon: Mnemosyne");
+                layout.graph_node(
+                    "OFF",
+                    "STATUS",
+                    false,
+                    "stopped",
+                    None,
+                    crossterm::style::Color::Red
+                );
+                layout.graph_branch_end();
                 layout.empty();
                 layout.badge_info("TIP", "Run 'mnem on' to start the daemon");
-                layout.info_bright("Run 'mnem on' to start the daemon.");
             }
         }
     }
