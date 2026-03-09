@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use crossterm::style::Stylize;
 
 use crate::ui::{Layout, Presentable};
 use mnem_core::protocol::SnapshotInfo;
