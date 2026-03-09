@@ -13,6 +13,7 @@ mod ui_components;
 #[command(version)]
 #[command(about = "Mnemosyne - Local history companion", long_about = None)]
 #[command(styles = styles())]
+#[command(arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -20,7 +21,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     project: Option<PathBuf>,
 
-    #[arg(long, global = true)]
+    #[arg(short, long, visible_alias = "j", global = true)]
     json: bool,
 }
 
@@ -35,109 +36,109 @@ fn styles() -> clap::builder::Styles {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Start daemon")]
+    #[command(about = "Start daemon", visible_alias = "on")]
     On {
-        #[arg(long)]
+        #[arg(short, long)]
         auto: bool,
     },
-    #[command(about = "Stop daemon")]
+    #[command(about = "Stop daemon", visible_alias = "off")]
     Off {},
-    #[command(about = "Show status")]
+    #[command(about = "Show status", visible_alias = "st")]
     Status {},
-    #[command(about = "Track project")]
+    #[command(about = "Track project", visible_alias = "track")]
     Track {
-        #[arg(long)]
+        #[arg(short, long)]
         list: bool,
-        #[arg(long, short)]
+        #[arg(short, long)]
         remove: bool,
-        #[arg(global = true)]
+        #[arg(short, long)]
         id: Option<String>,
     },
-    #[command(about = "View history")]
+    #[command(about = "View history", visible_alias = "history")]
     H {
         file: Option<String>,
-        #[arg(long, short)]
+        #[arg(short, long)]
         limit: Option<usize>,
-        #[arg(long)]
+        #[arg(short, long)]
         timeline: bool,
-        #[arg(long)]
+        #[arg(short, long)]
         since: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         branch: Option<String>,
     },
-    #[command(about = "Restore file")]
+    #[command(about = "Restore file", visible_alias = "restore")]
     R {
         file: Option<String>,
         version: Option<usize>,
-        #[arg(long, short)]
+        #[arg(short, long)]
         list: bool,
-        #[arg(long)]
+        #[arg(short, long)]
         undo: bool,
-        #[arg(long)]
+        #[arg(short, long)]
         to: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         symbol: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         checkpoint: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         branch: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         limit: Option<usize>,
     },
-    #[command(about = "Search history")]
+    #[command(about = "Search history", visible_alias = "search")]
     S {
         query: Option<String>,
-        #[arg(long, short)]
+        #[arg(short, long)]
         file: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         limit: Option<usize>,
-        #[arg(long)]
+        #[arg(short, long)]
         semantic: bool,
     },
-    #[command(about = "Show project info")]
+    #[command(about = "Show project info", visible_alias = "info")]
     Info { project: Option<String> },
-    #[command(about = "Garbage collection")]
+    #[command(about = "Garbage collection", visible_alias = "cleanup")]
     Gc {
-        #[arg(long)]
+        #[arg(short, long)]
         keep: Option<usize>,
-        #[arg(long, short)]
+        #[arg(short, long)]
         dry_run: bool,
-        #[arg(long)]
+        #[arg(short, long)]
         aggressive: bool,
     },
-    #[command(about = "Manage config")]
+    #[command(about = "Manage config", visible_alias = "cfg")]
     Config {
-        #[arg(long, short)]
+        #[arg(short, long)]
         get: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         set: Option<String>,
-        #[arg(long)]
+        #[arg(short, long)]
         reset: bool,
     },
-    #[command(about = "Git operations")]
+    #[command(about = "Git operations", visible_alias = "git")]
     Git {
-        #[arg(long)]
+        #[arg(short, long)]
         commits: bool,
-        #[arg(long)]
+        #[arg(short, long)]
         log: bool,
-        #[arg(long)]
+        #[arg(short, long)]
         hook: bool,
     },
-    #[command(about = "Uninstall mnem")]
+    #[command(about = "Uninstall mnem", visible_alias = "remove")]
     Uninstall {
-        #[arg(long)]
+        #[arg(short, long)]
         purge: bool,
     },
-    #[command(about = "Check for updates and update")]
+    #[command(about = "Check for updates and update", visible_alias = "upgrade")]
     Update {
-        #[arg(long)]
+        #[arg(short, long)]
         check_only: bool,
     },
-    #[command(about = "Start MCP server")]
+    #[command(about = "Start MCP server", visible_alias = "mcp-start")]
     McpStart {},
-    #[command(about = "Stop MCP server")]
+    #[command(about = "Stop MCP server", visible_alias = "mcp-stop")]
     McpStop {},
-    #[command(about = "Show MCP server status")]
+    #[command(about = "Show MCP server status", visible_alias = "mcp-status")]
     McpStatus {},
 }
 
