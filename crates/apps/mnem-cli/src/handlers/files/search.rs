@@ -12,6 +12,8 @@ pub struct SearchResponse {
     pub query: String,
     pub semantic: bool,
     pub results: SearchResults,
+    pub limit: usize,
+    pub page: usize,
 }
 
 #[derive(Serialize)]
@@ -132,7 +134,7 @@ impl Presentable for SearchResponse {
                                 first.timestamp[..16.min(first.timestamp.len())].replace('T', " ")
                             });
 
-                        let styled_hash = hash_short.with(crate::ui::ACCENT).bold().to_string();
+                        let styled_hash = hash_short.with(crate::ui::colors::CYAN_BRIGHT).bold().to_string();
                         let clickable_link = crate::ui::Hyperlink::action(&styled_hash, "open", hash);
 
                         let meta = format!(
@@ -157,6 +159,10 @@ impl Presentable for SearchResponse {
                 layout.footer_hint("Click on hash to open that version in your IDE");
             }
         }
+        
+        layout.empty();
+        layout.info(&format!("Page: {} | Items per page: {}", self.page, self.limit));
+        
         Ok(())
     }
 
@@ -168,7 +174,8 @@ impl Presentable for SearchResponse {
 pub fn handle_s(
     query: Option<String>,
     file: Option<String>,
-    limit: Option<usize>,
+    limit: usize,
+    page: usize,
     semantic: bool,
     json: bool,
 ) -> Result<()> {
@@ -186,11 +193,12 @@ pub fn handle_s(
             );
         } else {
             let layout = Layout::new();
-            layout.usage("s", "<query> [--file <path>] [--limit <n>] [--semantic]");
+            layout.usage("s", "<query> [--file <path>] [--limit <n>] [--page <p>] [--semantic]");
             layout.empty();
             layout.item_simple("Options:");
             layout.row_list("-f, --file <path>", "Filter by file path");
-            layout.row_list("-n, --limit <n>", "Maximum number of results (default: 50)");
+            layout.row_list("-n, --limit <n>", "Maximum number of results (default: 20)");
+            layout.row_list("-P, --page <p>", "Page number (default: 1)");
             layout.row_list("-s, --semantic", "Search for symbols instead of raw text");
             layout.empty();
             layout.item_simple("Examples:");
@@ -201,7 +209,7 @@ pub fn handle_s(
     }
 
     let query = query.unwrap();
-    let limit_val = limit.unwrap_or(50);
+    let offset = (page.saturating_sub(1)) * limit;
 
     let mut client = match DaemonClient::connect() {
         Ok(c) => c,
@@ -234,14 +242,16 @@ pub fn handle_s(
             locations.retain(|l| l.file_path.contains(filter.as_str()));
         }
 
-        locations.truncate(limit_val);
-        SearchResults::Semantic(locations)
+        // Apply manual pagination for symbols for now
+        let paginated: Vec<SymbolLocation> = locations.into_iter().skip(offset).take(limit).collect();
+        SearchResults::Semantic(paginated)
     } else {
         let res = client.call(
             methods::CONTENT_SEARCH_V1,
             serde_json::json!({
                 "query": query,
-                "limit": limit_val,
+                "limit": limit,
+                "offset": offset,
                 "path_filter": file
             }),
         )?;
@@ -256,6 +266,8 @@ pub fn handle_s(
         query,
         semantic,
         results,
+        limit,
+        page,
     };
 
     if json {

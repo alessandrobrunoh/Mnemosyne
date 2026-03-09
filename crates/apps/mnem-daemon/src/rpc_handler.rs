@@ -475,6 +475,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                     git_branch: sn.git_branch,
                                     commit_hash: sn.commit_hash,
                                     commit_message,
+                                    checkpoint_name: sn.checkpoint_name,
                                 }
                             })
                             .collect();
@@ -520,6 +521,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                         git_branch: sn.git_branch,
                                         commit_hash: sn.commit_hash,
                                         commit_message,
+                                        checkpoint_name: sn.checkpoint_name,
                                     }
                                 })
                                 .collect();
@@ -763,6 +765,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                             git_branch: sn.git_branch,
                             commit_hash: sn.commit_hash,
                             commit_message,
+                            checkpoint_name: sn.checkpoint_name,
                         });
                     }
                 }
@@ -973,6 +976,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                                     git_branch: sn.git_branch,
                                     commit_hash: sn.commit_hash,
                                     commit_message,
+                                    checkpoint_name: sn.checkpoint_name,
                                 },
                                 "symbol_name": sym.name,
                                 "symbol_kind": sym.kind,

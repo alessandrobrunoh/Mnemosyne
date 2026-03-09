@@ -57,8 +57,10 @@ enum Commands {
     #[command(about = "View history", visible_alias = "history")]
     H {
         file: Option<String>,
-        #[arg(short, long)]
-        limit: Option<usize>,
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+        #[arg(short = 'P', long, default_value = "1")]
+        page: usize,
         #[arg(short, long)]
         timeline: bool,
         #[arg(short, long)]
@@ -82,16 +84,20 @@ enum Commands {
         checkpoint: Option<String>,
         #[arg(short, long)]
         branch: Option<String>,
-        #[arg(short, long)]
-        limit: Option<usize>,
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+        #[arg(short = 'P', long, default_value = "1")]
+        page: usize,
     },
     #[command(about = "Search history", visible_alias = "search")]
     S {
         query: Option<String>,
         #[arg(short, long)]
         file: Option<String>,
-        #[arg(short, long)]
-        limit: Option<usize>,
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+        #[arg(short = 'P', long, default_value = "1")]
+        page: usize,
         #[arg(short, long)]
         semantic: bool,
     },
@@ -157,14 +163,17 @@ fn main() -> Result<()> {
         Some(Commands::On { auto }) => handlers::handle_on(auto, json),
         Some(Commands::Off {}) => handlers::handle_off(json),
         Some(Commands::Status {}) => handlers::handle_status(json),
-        Some(Commands::Track { list, remove, id }) => handlers::handle_track(list, remove, id, json),
+        Some(Commands::Track { list, remove, id }) => {
+            handlers::handle_track(list, remove, id, json)
+        }
         Some(Commands::H {
             file,
             limit,
+            page,
             timeline,
             since,
             branch,
-        }) => handlers::handle_h(file, limit, timeline, since, branch, json),
+        }) => handlers::handle_h(file, limit, page, timeline, since, branch, json),
         Some(Commands::R {
             file,
             version,
@@ -175,23 +184,29 @@ fn main() -> Result<()> {
             checkpoint,
             branch,
             limit,
+            page,
         }) => handlers::handle_r(
-            file, version, list, undo, to, symbol, checkpoint, branch, limit, json,
+            file, version, list, undo, to, symbol, checkpoint, branch, limit, page, json,
         ),
         Some(Commands::S {
             query,
             file,
             limit,
+            page,
             semantic,
-        }) => handlers::handle_s(query, file, limit, semantic, json),
+        }) => handlers::handle_s(query, file, limit, page, semantic, json),
         Some(Commands::Info { project }) => handlers::handle_info(project, json),
         Some(Commands::Gc {
             keep,
             dry_run,
             aggressive,
         }) => handlers::handle_gc(keep, dry_run, aggressive, json),
-        Some(Commands::Config { get, set, reset }) => handlers::handle_config(get, set, reset, json),
-        Some(Commands::Git { commits, log, hook }) => handlers::handle_git(commits, log, hook, json),
+        Some(Commands::Config { get, set, reset }) => {
+            handlers::handle_config(get, set, reset, json)
+        }
+        Some(Commands::Git { commits, log, hook }) => {
+            handlers::handle_git(commits, log, hook, json)
+        }
         Some(Commands::Uninstall { purge }) => handlers::handle_uninstall(purge, json),
         Some(Commands::Update { check_only }) => handlers::handle_update(check_only, json),
         Some(Commands::McpStart {}) => handlers::handle_mcp("start", json),

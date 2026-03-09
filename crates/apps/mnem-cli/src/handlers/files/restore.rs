@@ -20,30 +20,36 @@ pub struct RestoreResponse {
     pub history: Option<Vec<SnapshotInfo>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    pub limit: usize,
+    pub page: usize,
 }
 
 impl Presentable for RestoreResponse {
     fn render_tui(&self) -> Result<()> {
-        let layout = Layout::new();
+        use crate::ui::components::activity_graph::ActivityGraph;
+        
         if let Some(history) = &self.history {
             if let Some(f) = &self.file {
-                layout.header_dashboard("RESTORE VERSIONS");
-                layout.section_branch("fi", f);
-                layout.item_simple(&format!("Found {} versions", history.len()));
-
-                // We don't have easy access to ide/repo here for TUI links in this structure,
-                // but we can at least show the list.
-                for (i, snap) in history.iter().enumerate() {
-                    let hash_short = &snap.content_hash[..8.min(snap.content_hash.len())];
-                    layout.row_history_compact(hash_short, "M", f, &snap.timestamp, i == 0, None);
-                }
-                layout.section_end();
-                layout.footer("Use 'mnem r <file> [version]' to restore");
+                let cwd = std::env::current_dir()?;
+                let mut graph = ActivityGraph::new(
+                    &format!("RESTORE VERSIONS: {}", f),
+                    history.clone(),
+                    cwd,
+                    Some(f.clone())
+                );
+                graph.limit = self.limit;
+                graph.page = self.page;
+                graph.render_tui()?;
+                println!();
+                Layout::new().info("Use 'mnem r <file> [version_number]' to restore a specific version.");
+                return Ok(());
             }
-        } else if self.success {
-            layout.success(&self.message);
+        }
+
+        if self.success {
+            Layout::new().success_bright(&self.message);
         } else {
-            layout.error(&self.message);
+            Layout::new().error(&self.message);
         }
         Ok(())
     }
@@ -132,7 +138,8 @@ pub fn handle_r(
     symbol: Option<String>,
     checkpoint: Option<String>,
     branch: Option<String>,
-    limit: Option<usize>,
+    limit: usize,
+    page: usize,
     json: bool,
 ) -> Result<()> {
     use mnem_core::config::ConfigManager;
@@ -140,7 +147,7 @@ pub fn handle_r(
 
     let base_dir = get_base_dir()?;
     let config = ConfigManager::new(&base_dir)?;
-    let ide = config.config.ide;
+    let _ide = config.config.ide;
 
     cleanup_old_temp_files();
 
@@ -202,6 +209,8 @@ pub fn handle_r(
             message,
             history: None,
             file: None,
+            limit,
+            page,
         };
 
         if json {
@@ -247,40 +256,19 @@ pub fn handle_r(
             history.retain(|s| s.git_branch.as_deref().unwrap_or("main") == br);
         }
 
-        let max = limit.unwrap_or(50);
-        history.truncate(max);
-
         let response = RestoreResponse {
             success: true,
-            message: format!("Found {} versions", history.len()),
+            message: "Success".to_string(),
             history: Some(history),
             file: Some(f.clone()),
+            limit,
+            page,
         };
 
         if json {
             println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
         } else {
-            // Complex TUI with links needs direct layout calls for now
-            let layout = Layout::new();
-            layout.header_dashboard("RESTORE VERSIONS");
-            layout.section_branch("fi", f);
-            layout.item_simple(&response.message);
-
-            for (i, snap) in response.history.as_ref().unwrap().iter().enumerate() {
-                let hash_short = &snap.content_hash[..8.min(snap.content_hash.len())];
-                layout.row_version_with_link(
-                    i + 1,
-                    hash_short,
-                    &snap.content_hash,
-                    &snap.file_path,
-                    &snap.timestamp,
-                    i == 0,
-                    None,
-                    &ide,
-                );
-            }
-            layout.section_end();
-            layout.footer("Use 'mnem r <file> [version]' to restore");
+            response.render_tui()?;
         }
         return Ok(());
     }
@@ -391,6 +379,8 @@ pub fn handle_r(
         message,
         history: None,
         file: Some(f.clone()),
+        limit,
+        page,
     };
 
     if json {
@@ -438,6 +428,7 @@ fn get_history_for_restore(
                 git_branch: s.git_branch,
                 commit_hash: s.commit_hash,
                 commit_message: s.commit_message,
+                checkpoint_name: s.checkpoint_name,
             })
             .collect());
     }

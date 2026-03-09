@@ -13,6 +13,7 @@ pub struct Snapshot {
     pub session_id: Option<i64>,
     pub commit_hash: Option<String>,
     pub commit_message: Option<String>,
+    pub checkpoint_name: Option<String>,
 }
 
 pub struct FileEntry {

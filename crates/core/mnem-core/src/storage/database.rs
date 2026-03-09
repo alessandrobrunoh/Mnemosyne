@@ -33,6 +33,8 @@ struct SnapshotData {
     commit_hash: Option<String>,
     #[serde(default)]
     commit_message: Option<String>,
+    #[serde(default)]
+    pub checkpoint_name: Option<String>,
 }
 
 /// Helper function to safely deserialize SnapshotData, skipping old format or corrupted records
@@ -432,6 +434,7 @@ impl Database {
                 session_id,
                 commit_hash: None,
                 commit_message: None,
+                checkpoint_name: None,
             };
             let bytes = bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
             table
@@ -520,6 +523,7 @@ impl Database {
                     session_id: data.session_id,
                     commit_hash: data.commit_hash,
                     commit_message: data.commit_message,
+                    checkpoint_name: data.checkpoint_name,
                 });
             }
         }
@@ -562,6 +566,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             });
         }
         history.sort_by(|a, b| b.id.cmp(&a.id));
@@ -601,6 +606,7 @@ impl Database {
                     session_id: data.session_id,
                     commit_hash: data.commit_hash,
                     commit_message: data.commit_message,
+                    checkpoint_name: data.checkpoint_name,
                 });
             }
         }
@@ -792,6 +798,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             });
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -839,6 +846,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             });
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -1045,6 +1053,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             }))
         } else {
             Ok(None)
@@ -1561,6 +1570,7 @@ impl Database {
                         session_id: snap_data.session_id,
                         commit_hash: snap_data.commit_hash,
                         commit_message: snap_data.commit_message,
+                        checkpoint_name: snap_data.checkpoint_name,
                     };
                     let name = self.lookup_string(sym_data.name_id)?;
                     let kind = self.lookup_string(sym_data.kind_id)?;

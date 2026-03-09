@@ -595,6 +595,7 @@ pub struct SnapshotInfo {
     pub git_branch: Option<String>,
     pub commit_hash: Option<String>,
     pub commit_message: Option<String>,
+    pub checkpoint_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
