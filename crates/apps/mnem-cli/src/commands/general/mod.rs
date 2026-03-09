@@ -1,5 +1,3 @@
-pub mod help;
-pub mod version;
+pub mod git;
 
-pub use help::HelpCommand;
-pub use version::VersionCommand;
+pub use git::handle_git;

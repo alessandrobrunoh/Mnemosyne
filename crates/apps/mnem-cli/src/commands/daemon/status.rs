@@ -1,80 +1,140 @@
-use crate::commands::Command;
-use crate::ui::Layout;
 use anyhow::Result;
-use mnem_core::client::DaemonClient;
-use mnem_core::protocol::methods;
+use mnem_core::protocol::StatusResponse;
+use serde_json::Value;
 
-#[derive(Debug)]
-pub struct StatusCommand;
+use crate::ui::{Layout, Presentable};
 
-impl Command for StatusCommand {
-    fn name(&self) -> &str {
-        "status"
+fn format_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else if secs < 86400 {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    } else {
+        format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
     }
+}
 
-    fn usage(&self) -> &str {
-        ""
-    }
-
-    fn description(&self) -> &str {
-        "Show daemon status and information"
-    }
-
-    fn group(&self) -> &str {
-        "Daemon"
-    }
-
-    fn execute(&self, _args: &[String]) -> Result<()> {
+impl Presentable for StatusResponse {
+    fn render_tui(&self) -> Result<()> {
         let layout = Layout::new();
+        let theme = layout.theme();
 
-        match DaemonClient::connect() {
-            Ok(mut client) => {
-                let res = client.call(methods::DAEMON_GET_STATUS, serde_json::json!({}))?;
-                let status: mnem_core::protocol::StatusResponse = serde_json::from_value(res)?;
+        layout.graph_branch_start("daemon: Mnemosyne");
+        
+        // 1. Core Info
+        layout.graph_node(
+            &self.version,
+            "VERSION",
+            true,
+            "running",
+            None,
+            theme.success_bright
+        );
+        
+        let uptime = format_duration(self.uptime_secs);
+        layout.graph_node(
+            &uptime,
+            "UPTIME",
+            false,
+            "active",
+            None,
+            theme.text_dim
+        );
 
-                layout.section_start("st", "Daemon Status");
+        layout.graph_connector();
 
-                // Format latency display
-                let latency_display = if status.avg_response_time_ms < 1.0 {
-                    format!("{:.2}µs", status.avg_response_time_ms * 1000.0)
-                } else {
-                    format!("{:.3}ms", status.avg_response_time_ms)
-                };
+        // 2. Performance
+        layout.graph_block_header("⚡", "performance", theme.timeline_purple);
+        layout.graph_node(
+            &format!("{:.2} ms", self.avg_response_time_ms),
+            "AVG RESPONSE",
+            false,
+            "stable",
+            None,
+            theme.text_dim
+        );
+        layout.graph_node(
+            &format!("{:.2} ms", self.avg_save_time_ms),
+            "AVG SAVE",
+            false,
+            "stable",
+            None,
+            theme.text_dim
+        );
 
-                // Display basic info
-                let info = [
-                    ("Running", "√"),
-                    ("Version", &status.version),
-                    ("Uptime", &format!("{}s", status.uptime_secs)),
-                    ("Avg Latency", &latency_display),
-                ];
+        layout.graph_connector();
 
-                for (key, val) in info {
-                    layout.row_property(key, val);
-                }
+        // 3. Storage
+        layout.graph_block_header("💾", "storage", theme.timeline_cyan);
+        layout.graph_node(
+            &format!("{:.2} MB", self.history_size_bytes as f64 / 1024.0 / 1024.0),
+            "DB SIZE",
+            false,
+            "active",
+            None,
+            theme.text_dim
+        );
+        layout.graph_node(
+            &self.total_snapshots.to_string(),
+            "SNAPSHOTS",
+            false,
+            "indexed",
+            None,
+            theme.text_dim
+        );
 
-                // Display storage info
-                let hist_mb = status.history_size_bytes as f64 / 1024.0 / 1024.0;
-                let total_mb = status.total_size_bytes as f64 / 1024.0 / 1024.0;
-                let storage = format!("{:.2} MB (history) / {:.2} MB (total)", hist_mb, total_mb);
-                layout.row_property("Storage", &storage);
-
-                // Display watched projects
-                if !status.watched_projects.is_empty() {
-                    layout.empty();
-                    layout.item_simple("Watching:");
-                    for p in &status.watched_projects {
-                        layout.item_simple(&format!("  √  {}", p));
-                    }
-                }
-
-                layout.section_end();
-            }
-            Err(_) => {
-                layout.error("Daemon is NOT running");
-            }
-        }
-
+        layout.graph_branch_end();
         Ok(())
     }
+
+    fn render_json(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
+    }
+}
+
+pub fn handle_status(json: bool) -> Result<()> {
+    use mnem_core::client::DaemonClient;
+    use mnem_core::protocol::methods;
+
+    match DaemonClient::connect() {
+        Ok(mut client) => {
+            let res = client.call(methods::DAEMON_GET_STATUS, serde_json::json!({}))?;
+            let status: StatusResponse = serde_json::from_value(res)?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status.render_json()?)?);
+            } else {
+                status.render_tui()?;
+            }
+        }
+        Err(_) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Daemon is NOT running",
+                        "code": "DAEMON_NOT_RUNNING"
+                    })
+                );
+            } else {
+                let layout = Layout::new();
+                layout.graph_branch_start("daemon: Mnemosyne");
+                layout.graph_node(
+                    "OFF",
+                    "STATUS",
+                    false,
+                    "stopped",
+                    None,
+                    crossterm::style::Color::Red
+                );
+                layout.graph_branch_end();
+                layout.empty();
+                layout.badge_info("TIP", "Run 'mnem on' to start the daemon");
+            }
+        }
+    }
+    Ok(())
 }

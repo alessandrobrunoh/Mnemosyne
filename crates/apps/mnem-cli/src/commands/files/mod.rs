@@ -1,17 +1,9 @@
-pub mod cat;
-pub mod diff;
+pub mod history;
 pub mod info;
-pub mod log;
-pub mod open;
 pub mod restore;
 pub mod search;
-pub mod timeline;
 
-pub use cat::CatCommand;
-pub use diff::DiffCommand;
-pub use info::InfoCommand;
-pub use log::LogCommand;
-pub use open::OpenCommand;
-pub use restore::RestoreCommand;
-pub use search::SearchCommand;
-pub use timeline::TimelineCommand;
+pub use history::handle_h;
+pub use info::handle_info;
+pub use restore::handle_r;
+pub use search::handle_s;
