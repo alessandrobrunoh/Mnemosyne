@@ -176,7 +176,7 @@ mod tests {
         // PID 0 is invalid on all platforms
         let result = is_process_running(0);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[test]
@@ -194,7 +194,7 @@ mod tests {
         {
             // On Windows, it should just return false
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), false);
+            assert!(!result.unwrap());
         }
     }
 

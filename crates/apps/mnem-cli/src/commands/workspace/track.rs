@@ -3,7 +3,6 @@ use crate::ui::{Layout, List, PaginationInfo};
 use crate::ui::presentable::Renderable;
 use anyhow::Result;
 use clap::Args;
-use crossterm::style::Stylize;
 use serde::Serialize;
 
 #[derive(Serialize)]

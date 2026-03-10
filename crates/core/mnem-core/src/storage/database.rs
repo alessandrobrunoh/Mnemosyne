@@ -22,6 +22,8 @@ const STRINGS: TableDefinition<u32, &str> = TableDefinition::new("strings");
 const STRING_INDEX: TableDefinition<&str, u32> = TableDefinition::new("string_index");
 const CHUNK_TRIGRAMS: TableDefinition<&str, u64> = TableDefinition::new("chunk_trigrams");
 
+pub type CommitInfo = (String, String, String, String, usize);
+
 #[derive(Serialize, Deserialize, Clone)]
 struct SnapshotData {
     id: i64,
@@ -664,16 +666,16 @@ impl Database {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
             let data: SnapshotData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            if let Some(bid) = branch_id {
-                if data.git_branch_id != Some(bid) {
-                    continue;
-                }
+            if let Some(bid) = branch_id
+                && data.git_branch_id != Some(bid)
+            {
+                continue;
             }
             let path = self.lookup_string(data.file_path_id)?;
-            if let Some(f) = filter {
-                if !path.contains(f) {
-                    continue;
-                }
+            if let Some(f) = filter
+                && !path.contains(f)
+            {
+                continue;
             }
             let entry = files
                 .entry(data.file_path_id)
@@ -1548,11 +1550,11 @@ impl Database {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
             let sym_data: SymbolData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            if sym_data.structural_hash == latest_hash || sym_data.name_id == target_id {
-                if let Some(sv) = snap_table
+            if (sym_data.structural_hash == latest_hash || sym_data.name_id == target_id)
+                && let Some(sv) = snap_table
                     .get(sym_data.snapshot_id as u64)
                     .map_err(|e| AppError::Database(e.to_string()))?
-                {
+            {
                     let snap_data: SnapshotData = bincode::deserialize(sv.value())
                         .map_err(|e| AppError::Internal(e.to_string()))?;
                     let path = self.lookup_string(snap_data.file_path_id)?;
@@ -1594,7 +1596,6 @@ impl Database {
                         parent_id: sym_data.parent_id,
                     };
                     results.push((snap, sym));
-                }
             }
         }
         results.sort_by(|a, b| b.0.timestamp.cmp(&a.0.timestamp));
@@ -1852,7 +1853,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_commits(&self) -> AppResult<Vec<(String, String, String, String, usize)>> {
+    pub fn get_commits(&self) -> AppResult<Vec<CommitInfo>> {
         let read_txn = self
             .db
             .begin_read()

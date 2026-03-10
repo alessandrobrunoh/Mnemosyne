@@ -101,27 +101,29 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             *state.client_capabilities.write() = Some(params.capabilities);
 
             // Build server capabilities
-            let mut capabilities = ServerCapabilities::default();
-            capabilities.supported_methods = vec![
-                protocol::methods::PROJECT_WATCH.to_string(),
-                protocol::methods::PROJECT_UNWATCH.to_string(),
-                protocol::methods::PROJECT_LIST.to_string(),
-                protocol::methods::SNAPSHOT_CREATE.to_string(),
-                protocol::methods::SNAPSHOT_LIST.to_string(),
-                protocol::methods::SNAPSHOT_GET.to_string(),
-                protocol::methods::SNAPSHOT_RESTORE_V1.to_string(),
-                protocol::methods::SNAPSHOT_RESTORE_SYMBOL_V1.to_string(),
-                protocol::methods::SYMBOL_GET_HISTORY.to_string(),
-                protocol::methods::SYMBOL_SEARCH.to_string(),
-                protocol::methods::CONTENT_SEARCH_V1.to_string(),
-                protocol::methods::PROJECT_GET_STATISTICS.to_string(),
-                protocol::methods::DAEMON_GET_STATUS.to_string(),
-                protocol::methods::SYMBOL_GET_SEMANTIC_HISTORY.to_string(),
-                protocol::methods::MCP_START.to_string(),
-                protocol::methods::MCP_STOP.to_string(),
-                protocol::methods::MCP_STATUS.to_string(),
-                protocol::methods::MAINTENANCE_GC.to_string(),
-            ];
+            let capabilities = ServerCapabilities {
+                supported_methods: vec![
+                    protocol::methods::PROJECT_WATCH.to_string(),
+                    protocol::methods::PROJECT_UNWATCH.to_string(),
+                    protocol::methods::PROJECT_LIST.to_string(),
+                    protocol::methods::SNAPSHOT_CREATE.to_string(),
+                    protocol::methods::SNAPSHOT_LIST.to_string(),
+                    protocol::methods::SNAPSHOT_GET.to_string(),
+                    protocol::methods::SNAPSHOT_RESTORE_V1.to_string(),
+                    protocol::methods::SNAPSHOT_RESTORE_SYMBOL_V1.to_string(),
+                    protocol::methods::SYMBOL_GET_HISTORY.to_string(),
+                    protocol::methods::SYMBOL_SEARCH.to_string(),
+                    protocol::methods::CONTENT_SEARCH_V1.to_string(),
+                    protocol::methods::PROJECT_GET_STATISTICS.to_string(),
+                    protocol::methods::DAEMON_GET_STATUS.to_string(),
+                    protocol::methods::SYMBOL_GET_SEMANTIC_HISTORY.to_string(),
+                    protocol::methods::MCP_START.to_string(),
+                    protocol::methods::MCP_STOP.to_string(),
+                    protocol::methods::MCP_STATUS.to_string(),
+                    protocol::methods::MAINTENANCE_GC.to_string(),
+                ],
+                ..Default::default()
+            };
             *state.server_capabilities.write() = Some(capabilities.clone());
 
             {
@@ -512,7 +514,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 
                 if file_path.starts_with(project_path) {
                     let path_len = project_path.as_os_str().len();
-                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                    if best_match.as_ref().is_none_or(|(len, _)| path_len > *len) {
                         best_match = Some((path_len, Arc::clone(repo)));
                     }
                 }
@@ -663,7 +665,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let project_path = std::path::Path::new(&repo.project.path);
                 if file_path.starts_with(project_path) {
                     let path_len = project_path.as_os_str().len();
-                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                    if best_match.as_ref().is_none_or(|(len, _)| path_len > *len) {
                         best_match = Some((path_len, std::sync::Arc::clone(repo)));
                     }
                 }
@@ -711,7 +713,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let project_path = std::path::Path::new(&repo.project.path);
                 if file_path.starts_with(project_path) {
                     let path_len = project_path.as_os_str().len();
-                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                    if best_match.as_ref().is_none_or(|(len, _)| path_len > *len) {
                         best_match = Some((path_len, std::sync::Arc::clone(repo)));
                     }
                 }
@@ -792,10 +794,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
-                if let Some(ref filter_path) = params.project_path {
-                    if repo.project.path != *filter_path {
-                        continue;
-                    }
+                if let Some(ref filter_path) = params.project_path
+                    && repo.project.path != *filter_path
+                {
+                    continue;
                 }
 
                 match repo.find_symbols(&params.query) {
@@ -827,10 +829,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
-                if let Some(ref filter_path) = params.project_path {
-                    if repo.project.path != *filter_path {
-                        continue;
-                    }
+                if let Some(ref filter_path) = params.project_path
+                    && repo.project.path != *filter_path
+                {
+                    continue;
                 }
 
                 if let Ok(history) = repo.db.get_global_history(params.limit) {
@@ -889,24 +891,23 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let mut symbols_map = json!({});
                 for f in files {
                     files_list.push(json!(f.path));
-                    if let Ok(snaps) = repo.db.get_history(&f.path) {
-                        if let Some(latest) = snaps.first() {
-                            if let Ok(symbols) = repo.db.get_symbols_for_snapshot(latest.id) {
-                                symbols_map[&f.path] = json!(
-                                    symbols
-                                        .into_iter()
-                                        .map(|sym| {
-                                            json!({
-                                                "name": sym.name,
-                                                "kind": sym.kind,
-                                                "start_line": sym.start_line,
-                                                "end_line": sym.end_line
-                                            })
-                                        })
-                                        .collect::<Vec<_>>()
-                                );
-                            }
-                        }
+                    if let Ok(snaps) = repo.db.get_history(&f.path)
+                        && let Some(latest) = snaps.first()
+                        && let Ok(symbols) = repo.db.get_symbols_for_snapshot(latest.id)
+                    {
+                        symbols_map[&f.path] = json!(
+                            symbols
+                                .into_iter()
+                                .map(|sym| {
+                                    json!({
+                                        "name": sym.name,
+                                        "kind": sym.kind,
+                                        "start_line": sym.start_line,
+                                        "end_line": sym.end_line
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        );
                     }
                 }
                 let map = json!({ "files": files_list, "symbols": symbols_map });
@@ -984,25 +985,24 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let repo = repo_entry.value();
                 if file_path.starts_with(&repo.project.path) {
                     let path_len = repo.project.path.len();
-                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                    if best_match.as_ref().is_none_or(|(len, _)| path_len > *len) {
                         best_match = Some((path_len, std::sync::Arc::clone(repo)));
                     }
                 }
             }
 
-            if let Some((_, repo)) = best_match {
-                if let Ok(history) = repo.db.get_history(file_path) {
-                    if let Some(latest) = history.first() {
-                        let info = json!({
-                            "path": file_path,
-                            "snapshot_count": history.len(),
-                            "total_size_human": "Unknown",
-                            "earliest": history.last().map(|s| s.timestamp.clone()).unwrap_or_default(),
-                            "latest": latest.timestamp.clone(),
-                        });
-                        return JsonRpcResponse::success(req.id, info);
-                    }
-                }
+            if let Some((_, repo)) = best_match
+                && let Ok(history) = repo.db.get_history(file_path)
+                && let Some(latest) = history.first()
+            {
+                let info = json!({
+                    "path": file_path,
+                    "snapshot_count": history.len(),
+                    "total_size_human": "Unknown",
+                    "earliest": history.last().map(|s| s.timestamp.clone()).unwrap_or_default(),
+                    "latest": latest.timestamp.clone(),
+                });
+                return JsonRpcResponse::success(req.id, info);
             }
             JsonRpcResponse::error(req.id, -32000, "File not found in any project".into())
         }
@@ -1025,7 +1025,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let repo = repo_entry.value();
                 if params.file_path.starts_with(&repo.project.path) {
                     let path_len = repo.project.path.len();
-                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                    if best_match.as_ref().is_none_or(|(len, _)| path_len > *len) {
                         best_match = Some((path_len, std::sync::Arc::clone(repo)));
                     }
                 }
@@ -1061,8 +1061,9 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             let mut history = Vec::new();
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
-                if let Ok(h) = repo.db.get_symbol_history(&params.symbol_name) {
-                    if !h.is_empty() {
+                if let Ok(h) = repo.db.get_symbol_history(&params.symbol_name)
+                    && !h.is_empty()
+                {
                         for (sn, sym) in h {
                             let commit_message = sn.commit_hash.as_ref().and_then(|h| {
                                 repo.db
@@ -1090,7 +1091,6 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                             }));
                         }
                         break;
-                    }
                 }
             }
             JsonRpcResponse::success(req.id, json!({ "history": history }))
@@ -1299,24 +1299,24 @@ fn find_mcp_binary() -> Result<std::path::PathBuf, String> {
     }
 
     // 1. Check next to the current binary
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(parent) = current_exe.parent() {
-            let sibling = parent.join(&bin_name);
-            if sibling.exists() {
-                return Ok(sibling);
-            }
+    if let Ok(current_exe) = std::env::current_exe()
+        && let Some(parent) = current_exe.parent()
+    {
+        let sibling = parent.join(&bin_name);
+        if sibling.exists() {
+            return Ok(sibling);
         }
     }
 
     // 2. Check PATH
     #[cfg(unix)]
     {
-        if let Ok(output) = std::process::Command::new("which").arg("mnem-mcp").output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Ok(std::path::PathBuf::from(path));
-                }
+        if let Ok(output) = std::process::Command::new("which").arg("mnem-mcp").output()
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(std::path::PathBuf::from(path));
             }
         }
     }
