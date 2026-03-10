@@ -1,5 +1,6 @@
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::Layout;
+use crate::ui::components::table::{PaginationInfo, Table};
 use crate::ui::presentable::Renderable;
 use anyhow::Result;
 use clap::Args;
@@ -49,18 +50,10 @@ impl Renderable for TrackResponse {
             layout.graph_branch_end();
 
             // Pagination info
-            let total_pages = (self.total_projects as f64 / self.limit as f64).ceil() as usize;
-            println!();
-            println!(
-                "  {} {}/{}  {} {}  {} {}",
-                "PAGE".with(theme.text_dim).bold(),
-                self.page.to_string().with(theme.text_bright),
-                total_pages.to_string().with(theme.text_dim),
-                "TOTAL".with(theme.text_dim).bold(),
-                self.total_projects.to_string().with(theme.text_bright),
-                "STATUS".with(theme.text_dim).bold(),
-                "Listing".with(theme.text_bright)
-            );
+            let table = Table::new(theme.clone());
+            let info = PaginationInfo::new(self.page, self.total_projects, self.limit)
+                .with_info("STATUS".to_string(), "Listing".to_string());
+            table.pagination(&info);
         } else if let Some(current) = &self.current {
             if self.action == "remove" {
                 layout.graph_branch_start("workspace: project tracking");

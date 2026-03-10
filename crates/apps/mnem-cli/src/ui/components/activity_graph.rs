@@ -3,6 +3,7 @@ use crossterm::style::Stylize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use crate::ui::components::table::{PaginationInfo, Table};
 use crate::ui::{Layout, Renderable};
 use mnem_core::protocol::SnapshotInfo;
 
@@ -174,21 +175,11 @@ impl Renderable for ActivityGraph {
         }
 
         // 5. Discrete Footer
-        let total_pages = (total_count as f64 / self.limit as f64).ceil() as usize;
-        println!();
-        println!(
-            "  {} {}/{}  {} {}  {} {}",
-            "PAGE".with(theme.text_dim).bold(),
-            self.page.to_string().with(theme.text_bright),
-            total_pages.to_string().with(theme.text_dim),
-            "TOTAL".with(theme.text_dim).bold(),
-            total_count.to_string().with(theme.text_bright),
-            "FILE".with(theme.text_dim).bold(),
-            self.target_file
-                .as_deref()
-                .unwrap_or("Project")
-                .with(theme.text_bright)
-        );
+        let table = Table::new(theme.clone());
+        let file_name = self.target_file.as_deref().unwrap_or("Project").to_string();
+        let info = PaginationInfo::new(self.page, total_count, self.limit)
+            .with_info("FILE".to_string(), file_name);
+        table.pagination(&info);
 
         layout.legend(&[
             ("●", "Latest"),
