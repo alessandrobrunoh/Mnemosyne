@@ -11,4 +11,4 @@ pub use layout::Layout;
 pub use layout::LayoutBuilder;
 pub use presentable::Renderable;
 
-pub use crate::ui_components::{Elements, Hyperlink, List, Messages, Status};
+pub use components::{ActivityGraph, Elements, Hyperlink, BranchBadge, List, Messages, Status};

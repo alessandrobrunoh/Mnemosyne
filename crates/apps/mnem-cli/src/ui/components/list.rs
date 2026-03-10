@@ -1,6 +1,5 @@
 use crate::theme::Theme;
 use crossterm::style::Stylize;
-use mnem_macros::UiDebug;
 
 /// List component for displaying formatted lists in terminal UI
 ///
@@ -8,7 +7,7 @@ use mnem_macros::UiDebug;
 ///
 /// # Example
 /// ```rust
-/// use mnem_cli::ui_components::List;
+/// use mnem_cli::ui::List;
 /// use mnem_cli::theme::Theme;
 ///
 /// let list = List::new(Theme::default());
@@ -16,7 +15,7 @@ use mnem_macros::UiDebug;
 /// list.bullet("Second item");
 /// list.numbered(1, "Third item");
 /// ```
-#[derive(Debug, Clone, UiDebug)]
+#[derive(Debug, Clone)]
 pub struct List {
     theme: Theme,
 }

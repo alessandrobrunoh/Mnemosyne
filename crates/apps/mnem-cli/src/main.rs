@@ -6,7 +6,6 @@ use std::path::PathBuf;
 mod commands;
 mod theme;
 mod ui;
-mod ui_components;
 
 use commands::Commands;
 use commands::common::{CommandStrategy, GlobalOptions};

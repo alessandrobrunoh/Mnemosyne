@@ -1,10 +1,9 @@
 use crossterm::style::{Color, Stylize};
-use mnem_macros::UiDebug;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// Visual elements component for testing atomic UI pieces
-#[derive(Debug, Clone, UiDebug)]
+#[derive(Debug, Clone)]
 pub struct Elements {
     theme: crate::theme::Theme,
 }

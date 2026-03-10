@@ -1,7 +1,6 @@
 use crate::theme::Theme;
-use crate::ui_components::elements::Hyperlink;
+use crate::ui::components::elements::Hyperlink;
 use crossterm::style::Stylize;
-use mnem_macros::UiDebug;
 
 pub struct LayoutBuilder {
     theme: Option<Theme>,
@@ -64,7 +63,7 @@ impl LayoutBuilder {
     }
 }
 
-#[derive(Debug, Clone, UiDebug)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     theme: Theme,
     padding: usize,

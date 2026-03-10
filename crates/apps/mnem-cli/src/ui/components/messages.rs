@@ -1,6 +1,5 @@
 use crate::theme::Theme;
 use crossterm::style::Stylize;
-use mnem_macros::UiDebug;
 
 /// Messages component for displaying user-facing messages
 ///
@@ -8,7 +7,7 @@ use mnem_macros::UiDebug;
 ///
 /// # Example
 /// ```rust
-/// use mnem_cli::ui_components::Messages;
+/// use mnem_cli::ui::Messages;
 /// use mnem_cli::theme::Theme;
 ///
 /// let messages = Messages::new(Theme::default());
@@ -17,7 +16,7 @@ use mnem_macros::UiDebug;
 /// messages.warning("Be careful!");
 /// messages.info("Here's some information");
 /// ```
-#[derive(Debug, Clone, UiDebug)]
+#[derive(Debug, Clone)]
 pub struct Messages {
     theme: Theme,
 }

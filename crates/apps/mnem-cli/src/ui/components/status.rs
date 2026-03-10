@@ -1,12 +1,11 @@
 use crate::theme::Theme;
 use crossterm::style::Stylize;
-use mnem_macros::UiDebug;
 
 /// Status component for displaying status messages
 ///
 /// Provides methods for rendering success, error, warning, and info messages
 /// with theme-aware coloring.
-#[derive(Debug, Clone, UiDebug)]
+#[derive(Debug, Clone)]
 pub struct Status {
     theme: Theme,
 }
@@ -30,7 +29,7 @@ impl Status {
     ///
     /// # Example
     /// ```rust
-    /// use mnem_cli::ui_components::Status;
+    /// use mnem_cli::ui::Status;
     /// use mnem_cli::theme::Theme;
     ///
     /// let status = Status::new(Theme::default());
