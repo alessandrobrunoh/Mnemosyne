@@ -10,7 +10,6 @@ use mnem_core::env::get_base_dir;
 use mnem_core::protocol::SnapshotInfo;
 use mnem_core::protocol::methods;
 use mnem_core::storage::Repository;
-// Note: ChangeTag and TextDiff are available if needed for future diff features
 use std::path::PathBuf;
 
 #[derive(Serialize)]
@@ -43,7 +42,8 @@ impl Presentable for HistoryResponse {
         }
 
         // Show activity graph
-        let graph = ActivityGraph::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
+        let graph =
+            ActivityGraph::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
         let _ = graph.render_tui();
 
         layout.empty();

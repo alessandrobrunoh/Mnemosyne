@@ -13,7 +13,7 @@ use common::{CommandStrategy, GlobalOptions};
 use daemon::{
     McpStartCommand, McpStatusCommand, McpStopCommand, OffCommand, OnCommand, StatusCommand,
 };
-use files::{HistoryCommand, InfoCommand, RestoreCommand, SCommand};
+use files::{HistoryCommand, InfoCommand, RestoreCommand, SearchCommand};
 use general::GitCommand;
 use maintenance::{ConfigCommand, GcCommand, UninstallCommand, UpdateCommand};
 use workspace::TrackCommand;
@@ -59,7 +59,7 @@ declare_commands! {
     History => HistoryCommand,
     Info => InfoCommand,
     Restore => RestoreCommand,
-    S => SCommand,
+    Search => SearchCommand,
 
     // Maintenance commands
     Gc => GcCommand,

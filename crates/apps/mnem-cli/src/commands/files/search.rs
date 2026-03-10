@@ -190,7 +190,7 @@ impl Presentable for SearchResponse {
 
 /// Search through code history
 #[derive(Args, Clone, Debug)]
-pub struct SCommand {
+pub struct SearchCommand {
     /// Search query
     query: Option<String>,
 
@@ -211,7 +211,7 @@ pub struct SCommand {
     semantic: bool,
 }
 
-impl CommandStrategy for SCommand {
+impl CommandStrategy for SearchCommand {
     fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
         use mnem_core::{client::DaemonClient, protocol::methods};
 

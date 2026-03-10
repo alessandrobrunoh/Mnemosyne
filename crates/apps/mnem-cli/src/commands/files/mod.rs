@@ -7,4 +7,4 @@ pub mod search;
 pub use history::HistoryCommand;
 pub use info::InfoCommand;
 pub use restore::RestoreCommand;
-pub use search::SCommand;
+pub use search::SearchCommand;
