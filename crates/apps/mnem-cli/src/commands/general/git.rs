@@ -1,8 +1,9 @@
-
 use anyhow::Result;
+use clap::Args;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Presentable};
 
 #[derive(Serialize)]
@@ -49,54 +50,83 @@ impl Presentable for GitResponse {
     }
 }
 
-pub fn handle_git(commits: bool, log: bool, _hook: bool, json: bool) -> Result<()> {
-    use mnem_core::env::get_base_dir;
-    use mnem_core::storage::Repository;
+/// Git command for listing commits and logs
+#[derive(Args, Clone, Debug)]
+pub struct GitCommand {
+    /// List commits
+    #[arg(long)]
+    pub commits: bool,
 
-    let base_dir = get_base_dir()?;
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::open(base_dir, cwd)?;
+    /// Show git log
+    #[arg(long)]
+    pub log: bool,
 
-    if commits || log {
-        let git_commits = repo.list_commits()?;
-        let commits_info: Vec<GitCommitInfo> = git_commits
-            .into_iter()
-            .map(|(hash, message, author, timestamp, files)| GitCommitInfo {
-                hash,
-                message,
-                author,
-                timestamp,
-                files: files.to_string(),
-            })
-            .collect();
+    /// Install git hook
+    #[arg(long)]
+    pub hook: bool,
+}
 
-        let response = GitResponse {
-            success: true,
-            commits: commits_info,
-        };
+impl CommandStrategy for GitCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        use mnem_core::env::get_base_dir;
+        use mnem_core::storage::Repository;
 
-        if json {
-            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
-        } else if log {
-            println!("Git Log:");
-            println!("─");
-            for commit in &response.commits {
-                println!("{}  {}  {}", &commit.hash[..8], commit.timestamp, commit.message);
+        let base_dir = get_base_dir()?;
+        let cwd = std::env::current_dir()?;
+        let repo = Repository::open(base_dir, cwd)?;
+
+        if self.commits || self.log {
+            let git_commits = repo.list_commits()?;
+            let commits_info: Vec<GitCommitInfo> = git_commits
+                .into_iter()
+                .map(|(hash, message, author, timestamp, files)| GitCommitInfo {
+                    hash,
+                    message,
+                    author,
+                    timestamp,
+                    files: files.to_string(),
+                })
+                .collect();
+
+            let response = GitResponse {
+                success: true,
+                commits: commits_info,
+            };
+
+            if global_opts.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response.render_json()?)?
+                );
+            } else if self.log {
+                println!("Git Log:");
+                println!("─");
+                for commit in &response.commits {
+                    println!(
+                        "{}  {}  {}",
+                        &commit.hash[..8],
+                        commit.timestamp,
+                        commit.message
+                    );
+                }
+            } else {
+                response.render_tui()?;
             }
-        } else {
-            response.render_tui()?;
+            return Ok(());
         }
-        return Ok(());
-    }
 
-    if json {
-        println!("{}", serde_json::json!({ "success": false, "error": "No git action specified" }));
-    } else {
-        println!("Usage:");
-        println!("  mnem git --commits   # list commits");
-        println!("  mnem git --log      # git log");
-        println!("  mnem git --hook     # install hook");
-    }
+        if global_opts.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": false, "error": "No git action specified" })
+            );
+        } else {
+            println!("Usage:");
+            println!("  mnem git --commits   # list commits");
+            println!("  mnem git --log      # git log");
+            println!("  mnem git --hook     # install hook");
+        }
 
-    Ok(())
+        Ok(())
+    }
 }

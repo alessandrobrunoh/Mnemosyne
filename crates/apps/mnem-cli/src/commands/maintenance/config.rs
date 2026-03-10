@@ -1,7 +1,9 @@
 use anyhow::Result;
+use clap::Args;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Presentable};
 
 #[derive(Serialize)]
@@ -159,118 +161,82 @@ impl Presentable for ConfigResponse {
     }
 }
 
-pub fn handle_config(
-    get: Option<String>,
-    set: Option<String>,
-    reset: bool,
-    json: bool,
-) -> Result<()> {
-    use mnem_core::config::ConfigManager;
-    use mnem_core::env::get_base_dir;
+/// Manage Mnemosyne configuration
+#[derive(Args, Clone, Debug)]
+pub struct ConfigCommand {
+    /// Get a specific configuration value
+    #[arg(short, long)]
+    pub get: Option<String>,
 
-    let base_dir = get_base_dir()?;
-    let mut config_manager = ConfigManager::new(&base_dir)?;
+    /// Set a specific configuration value (format: key=value)
+    #[arg(short, long)]
+    pub set: Option<String>,
 
-    if reset {
-        // Reset by removing the config file and letting it recreate with defaults
-        let config_path = base_dir.join("config.toml");
-        if config_path.exists() {
-            std::fs::remove_file(&config_path)?;
-        }
-        config_manager = ConfigManager::new(&base_dir)?;
+    /// Reset configuration to defaults
+    #[arg(long)]
+    pub reset: bool,
+}
 
-        let response = ConfigResponse {
-            success: true,
-            message: "Config reset to defaults".to_string(),
-            config: None,
-        };
+impl CommandStrategy for ConfigCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        use mnem_core::config::ConfigManager;
+        use mnem_core::env::get_base_dir;
 
-        if json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
-        } else {
-            response.render_tui()?;
-        }
-        return Ok(());
-    }
+        let base_dir = get_base_dir()?;
+        let mut config_manager = ConfigManager::new(&base_dir)?;
 
-    if let Some(key) = get {
-        // Support both new nested keys and legacy flat keys
-        let normalized_key = normalize_key(key.as_str());
-        let value = config_manager
-            .get_value(&normalized_key)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if self.reset {
+            // Reset by removing the config file and letting it recreate with defaults
+            let config_path = base_dir.join("config.toml");
+            if config_path.exists() {
+                std::fs::remove_file(&config_path)?;
+            }
+            config_manager = ConfigManager::new(&base_dir)?;
 
-        if json {
-            println!(
-                "{}",
-                serde_json::json!({ "success": true, "key": key, "value": value })
-            );
-        } else {
-            let layout = Layout::new();
-            let theme = layout.theme();
-            layout.graph_branch_start(&format!("config: {}", key));
-            layout.graph_node(&value, "VALUE", true, "current", None, theme.success_bright);
-            layout.graph_branch_end();
-        }
-        return Ok(());
-    }
+            let response = ConfigResponse {
+                success: true,
+                message: "Config reset to defaults".to_string(),
+                config: None,
+            };
 
-    if let Some(key_value) = set {
-        let parts: Vec<&str> = key_value.splitn(2, '=').collect();
-        if parts.len() != 2 {
-            let err_msg = "Usage: mnem config --set key=value".to_string();
-            if json {
+            if global_opts.json {
                 println!(
                     "{}",
-                    serde_json::json!({ "success": false, "error": err_msg })
+                    serde_json::to_string_pretty(&response.render_json()?)?
                 );
             } else {
-                let layout = Layout::new();
-                layout.graph_branch_start("config: Mnemosyne");
-                layout.graph_node(
-                    "ERROR",
-                    "STATUS",
-                    true,
-                    "invalid",
-                    None,
-                    crossterm::style::Color::Red,
-                );
-                layout.graph_branch_end();
-                layout.empty();
-                layout.error(&err_msg);
+                response.render_tui()?;
             }
             return Ok(());
         }
 
-        let key = parts[0].trim();
-        let value = parts[1].trim();
+        if let Some(ref key) = self.get {
+            // Support both new nested keys and legacy flat keys
+            let normalized_key = normalize_key(key.as_str());
+            let value = config_manager
+                .get_value(&normalized_key)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        // Normalize the key and set the value
-        let normalized_key = normalize_key(key);
-
-        match config_manager.set_value(&normalized_key, value) {
-            Ok(_) => {
-                let response = ConfigResponse {
-                    success: true,
-                    message: format!("Set {} = {}", key, value),
-                    config: None,
-                };
-
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&response.render_json()?)?
-                    );
-                } else {
-                    response.render_tui()?;
-                }
+            if global_opts.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "success": true, "key": key, "value": value })
+                );
+            } else {
+                let layout = Layout::new();
+                let theme = layout.theme();
+                layout.graph_branch_start(&format!("config: {}", key));
+                layout.graph_node(&value, "VALUE", true, "current", None, theme.success_bright);
+                layout.graph_branch_end();
             }
-            Err(e) => {
-                let err_msg = format!("Failed to set config: {}", e);
-                if json {
+            return Ok(());
+        }
+
+        if let Some(ref key_value) = self.set {
+            let parts: Vec<&str> = key_value.splitn(2, '=').collect();
+            if parts.len() != 2 {
+                let err_msg = "Usage: mnem config --set key=value".to_string();
+                if global_opts.json {
                     println!(
                         "{}",
                         serde_json::json!({ "success": false, "error": err_msg })
@@ -282,7 +248,7 @@ pub fn handle_config(
                         "ERROR",
                         "STATUS",
                         true,
-                        "failed",
+                        "invalid",
                         None,
                         crossterm::style::Color::Red,
                     );
@@ -290,41 +256,90 @@ pub fn handle_config(
                     layout.empty();
                     layout.error(&err_msg);
                 }
+                return Ok(());
             }
+
+            let key = parts[0].trim();
+            let value = parts[1].trim();
+
+            // Normalize the key and set the value
+            let normalized_key = normalize_key(key);
+
+            match config_manager.set_value(&normalized_key, value) {
+                Ok(_) => {
+                    let response = ConfigResponse {
+                        success: true,
+                        message: format!("Set {} = {}", key, value),
+                        config: None,
+                    };
+
+                    if global_opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&response.render_json()?)?
+                        );
+                    } else {
+                        response.render_tui()?;
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to set config: {}", e);
+                    if global_opts.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({ "success": false, "error": err_msg })
+                        );
+                    } else {
+                        let layout = Layout::new();
+                        layout.graph_branch_start("config: Mnemosyne");
+                        layout.graph_node(
+                            "ERROR",
+                            "STATUS",
+                            true,
+                            "failed",
+                            None,
+                            crossterm::style::Color::Red,
+                        );
+                        layout.graph_branch_end();
+                        layout.empty();
+                        layout.error(&err_msg);
+                    }
+                }
+            }
+            return Ok(());
         }
-        return Ok(());
+
+        // Show full config
+        let response = ConfigResponse {
+            success: true,
+            message: "Current configuration".to_string(),
+            config: Some(ConfigData {
+                storage: StorageConfig {
+                    retention_days: config_manager.config.storage.retention_days,
+                    compression_enabled: config_manager.config.storage.compression_enabled,
+                    use_mnemosyneignore: config_manager.config.storage.use_mnemosyneignore,
+                    max_file_size_mb: config_manager.config.storage.max_file_size_mb,
+                },
+                ui: UiConfig {
+                    theme_index: config_manager.config.ui.theme_index,
+                },
+                editor: EditorConfig {
+                    ide: config_manager.config.editor.ide.as_str().to_string(),
+                },
+            }),
+        };
+
+        if global_opts.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.render_json()?)?
+            );
+        } else {
+            response.render_tui()?;
+        }
+
+        Ok(())
     }
-
-    // Show full config
-    let response = ConfigResponse {
-        success: true,
-        message: "Current configuration".to_string(),
-        config: Some(ConfigData {
-            storage: StorageConfig {
-                retention_days: config_manager.config.storage.retention_days,
-                compression_enabled: config_manager.config.storage.compression_enabled,
-                use_mnemosyneignore: config_manager.config.storage.use_mnemosyneignore,
-                max_file_size_mb: config_manager.config.storage.max_file_size_mb,
-            },
-            ui: UiConfig {
-                theme_index: config_manager.config.ui.theme_index,
-            },
-            editor: EditorConfig {
-                ide: config_manager.config.editor.ide.as_str().to_string(),
-            },
-        }),
-    };
-
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&response.render_json()?)?
-        );
-    } else {
-        response.render_tui()?;
-    }
-
-    Ok(())
 }
 
 /// Normalize legacy flat keys to new nested keys for backwards compatibility

@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::ui::Layout;
-use crate::ui::presentable::SimpleResponse;
 use crate::ui::Presentable;
+use crate::ui::presentable::SimpleResponse;
 
 pub fn handle_mcp(subcommand: &str, json: bool) -> Result<()> {
     use mnem_core::client::DaemonClient;
@@ -50,7 +50,10 @@ pub fn handle_mcp(subcommand: &str, json: bool) -> Result<()> {
             };
 
             if json {
-                println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response.render_json()?)?
+                );
             } else {
                 response.render_tui()?;
             }
@@ -93,84 +96,85 @@ pub fn handle_mcp(subcommand: &str, json: bool) -> Result<()> {
             };
 
             if json {
-                println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response.render_json()?)?
+                );
             } else {
                 response.render_tui()?;
             }
         }
 
-        "status" => {
-            match DaemonClient::connect() {
-                Ok(mut client) => match client.call(methods::MCP_STATUS, serde_json::json!({})) {
-                    Ok(res) => {
-                        let running = res
-                            .get("running")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let pid = res.get("pid").and_then(|v| v.as_u64());
-                        let transport = res
-                            .get("transport")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("stdio");
+        "status" => match DaemonClient::connect() {
+            Ok(mut client) => match client.call(methods::MCP_STATUS, serde_json::json!({})) {
+                Ok(res) => {
+                    let running = res
+                        .get("running")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let pid = res.get("pid").and_then(|v| v.as_u64());
+                    let transport = res
+                        .get("transport")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("stdio");
 
-                        if json {
-                            println!(
-                                "{}",
-                                serde_json::to_string_pretty(&json!({
-                                    "success": true,
-                                    "running": running,
-                                    "pid": pid,
-                                    "transport": transport
-                                }))?
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json!({
+                                "success": true,
+                                "running": running,
+                                "pid": pid,
+                                "transport": transport
+                            }))?
+                        );
+                    } else {
+                        layout.header_dashboard("MCP SERVER");
+                        if running {
+                            layout.success_bright("MCP server is RUNNING");
+                            layout.row_property(
+                                "PID",
+                                &pid.map(|p| p.to_string()).unwrap_or_default(),
                             );
+                            layout.row_property("Transport", transport);
                         } else {
-                            layout.header_dashboard("MCP SERVER");
-                            if running {
-                                layout.success_bright("MCP server is RUNNING");
-                                layout.row_property(
-                                    "PID",
-                                    &pid.map(|p| p.to_string()).unwrap_or_default(),
-                                );
-                                layout.row_property("Transport", transport);
-                            } else {
-                                layout.error("MCP server is NOT running");
-                                layout.info("Use 'mnem mcp start' to start it");
-                            }
+                            layout.error("MCP server is NOT running");
+                            layout.info("Use 'mnem mcp start' to start it");
                         }
                     }
-                    Err(e) => {
-                        if json {
-                            println!(
-                                "{}",
-                                json!({
-                                    "success": false,
-                                    "error": format!("Failed to get MCP status: {}", e),
-                                    "code": "MCP_STATUS_ERROR"
-                                })
-                            );
-                        } else {
-                            layout.header_dashboard("MCP SERVER");
-                            layout.error(&format!("Failed to get MCP status: {}", e));
-                        }
-                    }
-                },
-                Err(_) => {
+                }
+                Err(e) => {
                     if json {
                         println!(
                             "{}",
                             json!({
                                 "success": false,
-                                "error": "Daemon is not running",
-                                "code": "DAEMON_NOT_RUNNING"
+                                "error": format!("Failed to get MCP status: {}", e),
+                                "code": "MCP_STATUS_ERROR"
                             })
                         );
                     } else {
                         layout.header_dashboard("MCP SERVER");
-                        layout.error("Daemon is not running");
+                        layout.error(&format!("Failed to get MCP status: {}", e));
                     }
                 }
+            },
+            Err(_) => {
+                if json {
+                    println!(
+                        "{}",
+                        json!({
+                            "success": false,
+                            "error": "Daemon is not running",
+                            "code": "DAEMON_NOT_RUNNING"
+                        })
+                    );
+                } else {
+                    layout.header_dashboard("MCP SERVER");
+                    layout.error("Daemon is not running");
+                }
             }
-        }
+        },
 
         _ => {
             if json {

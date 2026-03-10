@@ -1,10 +1,12 @@
 use anyhow::Result;
+use clap::Args;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Presentable};
-use mnem_core::protocol::SymbolLocation;
 use mnem_core::models::SearchResult;
+use mnem_core::protocol::SymbolLocation;
 
 #[derive(Serialize)]
 pub struct SearchResponse {
@@ -49,7 +51,10 @@ impl Presentable for SearchResponse {
                     if !grouped.contains_key(&loc.file_path) {
                         file_order.push(loc.file_path.clone());
                     }
-                    grouped.entry(loc.file_path.clone()).or_default().push(loc.clone());
+                    grouped
+                        .entry(loc.file_path.clone())
+                        .or_default()
+                        .push(loc.clone());
                 }
 
                 for path in file_order {
@@ -134,35 +139,47 @@ impl Presentable for SearchResponse {
                                 first.timestamp[..16.min(first.timestamp.len())].replace('T', " ")
                             });
 
-                        let styled_hash = hash_short.with(crate::ui::colors::CYAN_BRIGHT).bold().to_string();
-                        let clickable_link = crate::ui::Hyperlink::action(&styled_hash, "open", hash);
+                        let styled_hash = hash_short
+                            .with(crate::ui::colors::CYAN_BRIGHT)
+                            .bold()
+                            .to_string();
+                        let clickable_link =
+                            crate::ui::Hyperlink::action(&styled_hash, "open", hash);
 
                         let meta = format!(
                             "{}  {}  [{}]",
                             timestamp.with(crossterm::style::Color::DarkGrey),
                             branch.cyan().italic(),
-                            format!("{} match(es)", matches_in_snap.len())
+                            clickable_link
                         );
-                        layout.row_snapshot(&clickable_link, &meta);
+                        layout.row_labeled("◆", &meta, &matches_in_snap.len().to_string());
+                        layout.empty();
 
-                        for m in matches_in_snap {
-                            let highlighted = highlight_match(&m.content, &self.query);
+                        for r in matches_in_snap {
+                            let line_num = r.line_number;
+                            let line_content = &r.content;
+
+                            let highlighted = if line_content.is_empty() {
+                                "•".dark_grey().to_string()
+                            } else {
+                                highlight_match(line_content, &self.query)
+                            };
+
                             println!(
-                                "┃   L{: >4}  {}",
-                                m.line_number.to_string().dark_grey(),
-                                highlighted
+                                "  {}  {}  {}",
+                                line_num.to_string().dark_grey(),
+                                highlighted,
+                                r.git_branch
+                                    .as_deref()
+                                    .map(|b| b.cyan().to_string())
+                                    .unwrap_or_default()
                             );
                         }
+                        layout.empty();
                     }
-                    layout.empty();
                 }
-                layout.footer_hint("Click on hash to open that version in your IDE");
             }
         }
-        
-        layout.empty();
-        layout.info(&format!("Page: {} | Items per page: {}", self.page, self.limit));
-        
         Ok(())
     }
 
@@ -171,112 +188,140 @@ impl Presentable for SearchResponse {
     }
 }
 
-pub fn handle_s(
+/// Search through code history
+#[derive(Args, Clone, Debug)]
+pub struct SCommand {
+    /// Search query
     query: Option<String>,
+
+    /// Filter by file path
+    #[arg(short, long)]
     file: Option<String>,
+
+    /// Maximum number of results
+    #[arg(short, long, default_value = "20")]
     limit: usize,
+
+    /// Page number
+    #[arg(short = 'P', long, default_value = "1")]
     page: usize,
+
+    /// Search for symbols instead of raw text
+    #[arg(short, long)]
     semantic: bool,
-    json: bool,
-) -> Result<()> {
-    use mnem_core::{client::DaemonClient, protocol::methods};
+}
 
-    if query.is_none() || query.as_ref().unwrap().is_empty() {
-        if json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "success": false,
-                    "error": "Missing query",
-                    "code": "MISSING_QUERY"
-                })
-            );
-        } else {
-            let layout = Layout::new();
-            layout.usage("s", "<query> [--file <path>] [--limit <n>] [--page <p>] [--semantic]");
-            layout.empty();
-            layout.item_simple("Options:");
-            layout.row_list("-f, --file <path>", "Filter by file path");
-            layout.row_list("-n, --limit <n>", "Maximum number of results (default: 20)");
-            layout.row_list("-P, --page <p>", "Page number (default: 1)");
-            layout.row_list("-s, --semantic", "Search for symbols instead of raw text");
-            layout.empty();
-            layout.item_simple("Examples:");
-            layout.item_simple("  mnem s \"main\" --file main.rs");
-            layout.item_simple("  mnem s \"UserRepository\" --semantic");
-        }
-        return Ok(());
-    }
+impl CommandStrategy for SCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        use mnem_core::{client::DaemonClient, protocol::methods};
 
-    let query = query.unwrap();
-    let offset = (page.saturating_sub(1)) * limit;
-
-    let mut client = match DaemonClient::connect() {
-        Ok(c) => c,
-        Err(_) => {
-            if json {
+        if self.query.is_none() || self.query.as_ref().unwrap().is_empty() {
+            if global_opts.json {
                 println!(
                     "{}",
                     serde_json::json!({
                         "success": false,
-                        "error": "Daemon not running",
-                        "code": "DAEMON_NOT_RUNNING"
+                        "error": "Missing query",
+                        "code": "MISSING_QUERY"
                     })
                 );
             } else {
-                Layout::new().error("Daemon is not running. Start it with 'mnem on'");
+                let layout = Layout::new();
+                layout.usage(
+                    "s",
+                    "<query> [--file <path>] [--limit <n>] [--page <p>] [--semantic]",
+                );
+                layout.empty();
+                layout.item_simple("Options:");
+                layout.row_list("-f, --file <path>", "Filter by file path");
+                layout.row_list("-n, --limit <n>", "Maximum number of results (default: 20)");
+                layout.row_list("-P, --page <p>", "Page number (default: 1)");
+                layout.row_list("-s, --semantic", "Search for symbols instead of raw text");
+                layout.empty();
+                layout.item_simple("Examples:");
+                layout.item_simple("  mnem s \"main\" --file main.rs");
+                layout.item_simple("  mnem s \"UserRepository\" --semantic");
             }
             return Ok(());
         }
-    };
 
-    let results = if semantic {
-        let res = client.call(
-            methods::SYMBOL_SEARCH,
-            serde_json::json!({ "query": query }),
-        )?;
+        let query = self.query.clone().unwrap();
+        let offset = (self.page.saturating_sub(1)) * self.limit;
 
-        let mut locations: Vec<SymbolLocation> = serde_json::from_value(res)?;
+        let mut client = match DaemonClient::connect() {
+            Ok(c) => c,
+            Err(_) => {
+                if global_opts.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "success": false,
+                            "error": "Daemon not running",
+                            "code": "DAEMON_NOT_RUNNING"
+                        })
+                    );
+                } else {
+                    Layout::new().error("Daemon is not running. Start it with 'mnem on'");
+                }
+                return Ok(());
+            }
+        };
 
-        if let Some(ref filter) = file {
-            locations.retain(|l| l.file_path.contains(filter.as_str()));
+        let results = if self.semantic {
+            let res = client.call(
+                methods::SYMBOL_SEARCH,
+                serde_json::json!({ "query": query }),
+            )?;
+
+            let mut locations: Vec<SymbolLocation> = serde_json::from_value(res)?;
+
+            if let Some(ref filter) = self.file {
+                locations.retain(|l| l.file_path.contains(filter.as_str()));
+            }
+
+            // Apply manual pagination for symbols for now
+            let paginated: Vec<SymbolLocation> = locations
+                .into_iter()
+                .skip(offset)
+                .take(self.limit)
+                .collect();
+            SearchResults::Semantic(paginated)
+        } else {
+            let res = client.call(
+                methods::CONTENT_SEARCH_V1,
+                serde_json::json!({
+                    "query": query,
+                    "limit": self.limit,
+                    "offset": offset,
+                    "path_filter": self.file
+                }),
+            )?;
+
+            let results: Vec<SearchResult> =
+                serde_json::from_value(res["results"].clone()).unwrap_or_default();
+            SearchResults::Content(results)
+        };
+
+        let response = SearchResponse {
+            success: true,
+            query,
+            semantic: self.semantic,
+            results,
+            limit: self.limit,
+            page: self.page,
+        };
+
+        if global_opts.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.render_json()?)?
+            );
+        } else {
+            response.render_tui()?;
         }
 
-        // Apply manual pagination for symbols for now
-        let paginated: Vec<SymbolLocation> = locations.into_iter().skip(offset).take(limit).collect();
-        SearchResults::Semantic(paginated)
-    } else {
-        let res = client.call(
-            methods::CONTENT_SEARCH_V1,
-            serde_json::json!({
-                "query": query,
-                "limit": limit,
-                "offset": offset,
-                "path_filter": file
-            }),
-        )?;
-
-        let results: Vec<SearchResult> =
-            serde_json::from_value(res["results"].clone()).unwrap_or_default();
-        SearchResults::Content(results)
-    };
-
-    let response = SearchResponse {
-        success: true,
-        query,
-        semantic,
-        results,
-        limit,
-        page,
-    };
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
-    } else {
-        response.render_tui()?;
+        Ok(())
     }
-
-    Ok(())
 }
 
 fn highlight_match(line: &str, query: &str) -> String {

@@ -1,3 +1,3 @@
 pub mod git;
 
-pub use git::handle_git;
+pub use git::GitCommand;

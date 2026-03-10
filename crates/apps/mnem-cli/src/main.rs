@@ -9,6 +9,7 @@ mod ui;
 mod ui_components;
 
 use commands::Commands;
+use commands::common::{CommandStrategy, GlobalOptions};
 
 #[derive(Parser)]
 #[command(name = "mnem")]
@@ -44,71 +45,20 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     std::fs::write("/tmp/mnem_debug.log", "DEBUG: CLI parsed\n").ok();
 
-    if let Some(project_path) = cli.project {
+    if let Some(ref project_path) = cli.project {
         std::env::set_current_dir(project_path)?;
     }
 
-    let json = cli.json;
+    let global_opts = GlobalOptions {
+        project: cli.project,
+        json: cli.json,
+    };
 
     match cli.command {
-        Some(Commands::On { auto }) => commands::handle_on(auto, json),
-        Some(Commands::Off {}) => commands::handle_off(json),
-        Some(Commands::Status {}) => commands::handle_status(json),
-        Some(Commands::Track {
-            list,
-            remove,
-            purge,
-            id,
-            limit,
-            page,
-        }) => commands::handle_track(list, remove, purge, id, limit, page, json),
-        Some(Commands::H {
-            file,
-            limit,
-            page,
-            timeline,
-            since,
-            branch,
-            clear,
-        }) => commands::handle_h(file, limit, page, timeline, since, branch, clear, json),
-        Some(Commands::R {
-            file,
-            version,
-            list,
-            undo,
-            to,
-            symbol,
-            checkpoint,
-            branch,
-            limit,
-            page,
-        }) => commands::handle_r(
-            file, version, list, undo, to, symbol, checkpoint, branch, limit, page, json,
-        ),
-        Some(Commands::S {
-            query,
-            file,
-            limit,
-            page,
-            semantic,
-        }) => commands::handle_s(query, file, limit, page, semantic, json),
-        Some(Commands::Info { project }) => commands::handle_info(project, json),
-        Some(Commands::Gc {
-            keep,
-            dry_run,
-            aggressive,
-        }) => commands::handle_gc(keep, dry_run, aggressive, json),
-        Some(Commands::Config { get, set, reset }) => {
-            commands::handle_config(get, set, reset, json)
+        Some(cmd) => cmd.execute(&global_opts),
+        None => {
+            // Default to showing status when no command is provided
+            commands::daemon::StatusCommand.execute(&global_opts)
         }
-        Some(Commands::Git { commits, log, hook }) => {
-            commands::handle_git(commits, log, hook, json)
-        }
-        Some(Commands::Uninstall { purge }) => commands::handle_uninstall(purge, json),
-        Some(Commands::Update { check_only }) => commands::handle_update(check_only, json),
-        Some(Commands::McpStart {}) => commands::handle_mcp("start", json),
-        Some(Commands::McpStop {}) => commands::handle_mcp("stop", json),
-        Some(Commands::McpStatus {}) => commands::handle_mcp("status", json),
-        None => commands::handle_status(json),
     }
 }

@@ -774,7 +774,15 @@ impl Layout {
         );
     }
 
-    pub fn graph_node(&self, hash: &str, meta: &str, is_latest: bool, time: &str, icon: Option<&str>, color: crossterm::style::Color) {
+    pub fn graph_node(
+        &self,
+        hash: &str,
+        meta: &str,
+        is_latest: bool,
+        time: &str,
+        icon: Option<&str>,
+        color: crossterm::style::Color,
+    ) {
         let dot = if is_latest {
             "●".with(self.theme.success_bright)
         } else {

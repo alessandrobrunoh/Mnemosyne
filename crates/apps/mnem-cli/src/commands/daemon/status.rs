@@ -1,7 +1,9 @@
 use anyhow::Result;
+use clap::Args;
 use mnem_core::protocol::StatusResponse;
 use serde_json::Value;
 
+use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Presentable};
 
 fn format_duration(secs: u64) -> String {
@@ -22,7 +24,7 @@ impl Presentable for StatusResponse {
         let theme = layout.theme();
 
         layout.graph_branch_start("daemon: Mnemosyne");
-        
+
         // 1. Core Info
         layout.graph_node(
             &self.version,
@@ -30,18 +32,11 @@ impl Presentable for StatusResponse {
             true,
             "running",
             None,
-            theme.success_bright
+            theme.success_bright,
         );
-        
+
         let uptime = format_duration(self.uptime_secs);
-        layout.graph_node(
-            &uptime,
-            "UPTIME",
-            false,
-            "active",
-            None,
-            theme.text_dim
-        );
+        layout.graph_node(&uptime, "UPTIME", false, "active", None, theme.text_dim);
 
         layout.graph_connector();
 
@@ -53,7 +48,7 @@ impl Presentable for StatusResponse {
             false,
             "stable",
             None,
-            theme.text_dim
+            theme.text_dim,
         );
         layout.graph_node(
             &format!("{:.2} ms", self.avg_save_time_ms),
@@ -61,7 +56,7 @@ impl Presentable for StatusResponse {
             false,
             "stable",
             None,
-            theme.text_dim
+            theme.text_dim,
         );
 
         layout.graph_connector();
@@ -74,7 +69,7 @@ impl Presentable for StatusResponse {
             false,
             "active",
             None,
-            theme.text_dim
+            theme.text_dim,
         );
         layout.graph_node(
             &self.total_snapshots.to_string(),
@@ -82,7 +77,7 @@ impl Presentable for StatusResponse {
             false,
             "indexed",
             None,
-            theme.text_dim
+            theme.text_dim,
         );
 
         layout.graph_branch_end();
@@ -94,47 +89,53 @@ impl Presentable for StatusResponse {
     }
 }
 
-pub fn handle_status(json: bool) -> Result<()> {
-    use mnem_core::client::DaemonClient;
-    use mnem_core::protocol::methods;
+/// Show daemon status and performance metrics
+#[derive(Args, Clone, Debug)]
+pub struct StatusCommand;
 
-    match DaemonClient::connect() {
-        Ok(mut client) => {
-            let res = client.call(methods::DAEMON_GET_STATUS, serde_json::json!({}))?;
-            let status: StatusResponse = serde_json::from_value(res)?;
+impl CommandStrategy for StatusCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        use mnem_core::client::DaemonClient;
+        use mnem_core::protocol::methods;
 
-            if json {
-                println!("{}", serde_json::to_string_pretty(&status.render_json()?)?);
-            } else {
-                status.render_tui()?;
+        match DaemonClient::connect() {
+            Ok(mut client) => {
+                let res = client.call(methods::DAEMON_GET_STATUS, serde_json::json!({}))?;
+                let status: StatusResponse = serde_json::from_value(res)?;
+
+                if global_opts.json {
+                    println!("{}", serde_json::to_string_pretty(&status.render_json()?)?);
+                } else {
+                    status.render_tui()?;
+                }
+            }
+            Err(_) => {
+                if global_opts.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "success": false,
+                            "error": "Daemon is NOT running",
+                            "code": "DAEMON_NOT_RUNNING"
+                        })
+                    );
+                } else {
+                    let layout = Layout::new();
+                    layout.graph_branch_start("daemon: Mnemosyne");
+                    layout.graph_node(
+                        "OFF",
+                        "STATUS",
+                        false,
+                        "stopped",
+                        None,
+                        crossterm::style::Color::Red,
+                    );
+                    layout.graph_branch_end();
+                    layout.empty();
+                    layout.badge_info("TIP", "Run 'mnem on' to start the daemon");
+                }
             }
         }
-        Err(_) => {
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "success": false,
-                        "error": "Daemon is NOT running",
-                        "code": "DAEMON_NOT_RUNNING"
-                    })
-                );
-            } else {
-                let layout = Layout::new();
-                layout.graph_branch_start("daemon: Mnemosyne");
-                layout.graph_node(
-                    "OFF",
-                    "STATUS",
-                    false,
-                    "stopped",
-                    None,
-                    crossterm::style::Color::Red
-                );
-                layout.graph_branch_end();
-                layout.empty();
-                layout.badge_info("TIP", "Run 'mnem on' to start the daemon");
-            }
-        }
+        Ok(())
     }
-    Ok(())
 }

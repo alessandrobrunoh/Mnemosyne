@@ -1,8 +1,10 @@
 use anyhow::Result;
+use clap::Args;
 use serde::{Deserialize, Serialize};
-
-use crate::ui::Layout;
 use serde_json::Value;
+
+use crate::commands::common::{CommandStrategy, GlobalOptions};
+use crate::ui::Layout;
 use crate::ui::Presentable;
 
 const GITHUB_REPO: &str = "alessandrobrunoh/Mnemosyne";
@@ -58,89 +60,112 @@ impl Presentable for UpdateResponse {
     }
 }
 
-pub fn handle_update(check_only: bool, json: bool) -> Result<()> {
-    let layout = Layout::new();
+/// Check for updates and optionally install the latest version
+#[derive(Args, Clone, Debug)]
+pub struct UpdateCommand {
+    /// Only check for updates without installing
+    #[arg(short, long)]
+    pub check_only: bool,
+}
 
-    if !json {
-        layout.header_dashboard("CHECKING FOR UPDATES");
-        layout.empty();
-    }
+impl CommandStrategy for UpdateCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        let layout = Layout::new();
 
-    let current_version = env!("CARGO_PKG_VERSION");
-    
-    if !json {
-        layout.row_labeled("◆", "Current Version", current_version);
-        layout.empty();
-        layout.info("Checking GitHub for latest release...");
-        layout.empty();
-    }
-
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("Mnemosyne-CLI")
-        .build()?;
-
-    let url = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        GITHUB_REPO
-    );
-    let response = client.get(&url).send()?;
-
-    if !response.status().is_success() {
-        if json {
-            println!("{}", serde_json::json!({
-                "success": false,
-                "error": "Could not check for updates",
-                "http_status": response.status().as_u16()
-            }));
-        } else {
-            layout.warning("Could not check for updates");
-            layout.info(&format!("GitHub API returned: {}", response.status()));
+        if !global_opts.json {
+            layout.header_dashboard("CHECKING FOR UPDATES");
+            layout.empty();
         }
-        return Ok(());
-    }
 
-    let release: GitHubRelease = response.json()?;
-    let latest_version = release.tag_name.trim_start_matches('v');
-    let update_available = latest_version != current_version;
+        let current_version = env!("CARGO_PKG_VERSION");
 
-    let mut update_res = UpdateResponse {
-        success: true,
-        current_version: current_version.to_string(),
-        latest_version: latest_version.to_string(),
-        update_available,
-        message: if update_available { "New version available".to_string() } else { "Already on latest version".to_string() },
-        check_only,
-    };
+        if !global_opts.json {
+            layout.row_labeled("◆", "Current Version", current_version);
+            layout.empty();
+            layout.info("Checking GitHub for latest release...");
+            layout.empty();
+        }
 
-    if !update_available || check_only {
-        if json {
-            println!("{}", serde_json::to_string_pretty(&update_res.render_json()?)?);
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Mnemosyne-CLI")
+            .build()?;
+
+        let url = format!(
+            "https://api.github.com/repos/{}/releases/latest",
+            GITHUB_REPO
+        );
+        let response = client.get(&url).send()?;
+
+        if !response.status().is_success() {
+            if global_opts.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Could not check for updates",
+                        "http_status": response.status().as_u16()
+                    })
+                );
+            } else {
+                layout.warning("Could not check for updates");
+                layout.info(&format!("GitHub API returned: {}", response.status()));
+            }
+            return Ok(());
+        }
+
+        let release: GitHubRelease = response.json()?;
+        let latest_version = release.tag_name.trim_start_matches('v');
+        let update_available = latest_version != current_version;
+
+        let mut update_res = UpdateResponse {
+            success: true,
+            current_version: current_version.to_string(),
+            latest_version: latest_version.to_string(),
+            update_available,
+            message: if update_available {
+                "New version available".to_string()
+            } else {
+                "Already on latest version".to_string()
+            },
+            check_only: self.check_only,
+        };
+
+        if !update_available || self.check_only {
+            if global_opts.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&update_res.render_json()?)?
+                );
+            } else {
+                update_res.render_tui()?;
+            }
+            return Ok(());
+        }
+
+        let install_result = perform_installation(&layout, &client, &release, global_opts.json);
+
+        match install_result {
+            Ok(_) => {
+                update_res.success = true;
+                update_res.message = "Update installed successfully".to_string();
+            }
+            Err(e) => {
+                update_res.success = false;
+                update_res.message = format!("Installation failed: {}", e);
+            }
+        }
+
+        if global_opts.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&update_res.render_json()?)?
+            );
         } else {
             update_res.render_tui()?;
         }
-        return Ok(());
+
+        Ok(())
     }
-
-    let install_result = perform_installation(&layout, &client, &release, json);
-
-    match install_result {
-        Ok(_) => {
-            update_res.success = true;
-            update_res.message = "Update installed successfully".to_string();
-        }
-        Err(e) => {
-            update_res.success = false;
-            update_res.message = format!("Installation failed: {}", e);
-        }
-    }
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&update_res.render_json()?)?);
-    } else {
-        update_res.render_tui()?;
-    }
-
-    Ok(())
 }
 
 fn perform_installation(
@@ -161,7 +186,7 @@ fn perform_installation(
 
 #[cfg(windows)]
 fn install_windows(
-    layout: &crate::ui::Layout,
+    layout: &Layout,
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
     json: bool,
@@ -293,7 +318,7 @@ fn install_windows(
 
 #[cfg(not(windows))]
 fn install_unix(
-    layout: &crate::ui::Layout,
+    layout: &Layout,
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
     json: bool,

@@ -1,54 +1,70 @@
 use anyhow::Result;
+use clap::Args;
 use std::process::Command;
 
+use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::Layout;
-use crate::ui::presentable::SimpleResponse;
 use crate::ui::Presentable;
+use crate::ui::presentable::SimpleResponse;
 
-pub fn handle_uninstall(purge: bool, json: bool) -> Result<()> {
-    let layout = Layout::new();
+/// Uninstall Mnemosyne from the system
+#[derive(Args, Clone, Debug)]
+pub struct UninstallCommand {
+    /// Remove all configuration and history
+    #[arg(short, long)]
+    pub purge: bool,
+}
 
-    if !json {
-        layout.header_dashboard("UNINSTALL MNEMOSYNE");
-        if purge {
-            layout.warning("This will remove mnem and ALL configuration/history from your system");
-        } else {
-            layout.warning("This will remove mnem binaries from your system (history will be preserved)");
+impl CommandStrategy for UninstallCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        let layout = Layout::new();
+
+        if !global_opts.json {
+            layout.header_dashboard("UNINSTALL MNEMOSYNE");
+            if self.purge {
+                layout.warning(
+                    "This will remove mnem and ALL configuration/history from your system",
+                );
+            } else {
+                layout.warning(
+                    "This will remove mnem binaries from your system (history will be preserved)",
+                );
+            }
+            layout.empty();
         }
-        layout.empty();
-    }
 
-    let base_dir = dirs::home_dir()
-        .map(|p| p.join(".mnemosyne"))
-        .unwrap_or_default();
+        let base_dir = dirs::home_dir()
+            .map(|p| p.join(".mnemosyne"))
+            .unwrap_or_default();
 
-    if !json {
-        layout.row_labeled("◫", "Install Dir", &base_dir.to_string_lossy());
-        layout.empty();
-        layout.info("Running uninstall script...");
-        layout.empty();
-    }
+        if !global_opts.json {
+            layout.row_labeled("◫", "Install Dir", &base_dir.to_string_lossy());
+            layout.empty();
+            layout.info("Running uninstall script...");
+            layout.empty();
+        }
 
-    let result = run_uninstall_script(purge)?;
+        let result = run_uninstall_script(self.purge)?;
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&result.render_json()?)?);
-    } else {
-        if result.success {
-            layout.success_bright(&format!("✓ {}", result.message));
-            layout.info("You can now remove this binary");
+        if global_opts.json {
+            println!("{}", serde_json::to_string_pretty(&result.render_json()?)?);
         } else {
-            layout.error(&result.message);
-            if result.code == Some("UNINSTALL_SCRIPT_NOT_FOUND".to_string()) {
-                #[cfg(windows)]
-                layout.info("Please run: powershell -File scripts/uninstall.ps1");
-                #[cfg(not(windows))]
-                layout.info("Please run: bash scripts/uninstall.sh");
+            if result.success {
+                layout.success_bright(&format!("✓ {}", result.message));
+                layout.info("You can now remove this binary");
+            } else {
+                layout.error(&result.message);
+                if result.code == Some("UNINSTALL_SCRIPT_NOT_FOUND".to_string()) {
+                    #[cfg(windows)]
+                    layout.info("Please run: powershell -File scripts/uninstall.ps1");
+                    #[cfg(not(windows))]
+                    layout.info("Please run: bash scripts/uninstall.sh");
+                }
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
@@ -81,9 +97,7 @@ fn run_uninstall_script(purge: bool) -> Result<SimpleResponse> {
             args.push("--purge");
         }
 
-        let output = Command::new("powershell")
-            .args(&args)
-            .output()?;
+        let output = Command::new("powershell").args(&args).output()?;
 
         if output.status.success() {
             Ok(SimpleResponse {
