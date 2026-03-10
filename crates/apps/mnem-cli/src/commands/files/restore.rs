@@ -69,6 +69,7 @@ impl Renderable for RestoreResponse {
 
 /// Restore files to previous versions
 #[derive(Args, Clone, Debug)]
+#[command(alias = "r")]
 pub struct RestoreCommand {
     /// File to restore
     file: Option<String>,

@@ -37,73 +37,17 @@ impl Renderable for HistoryResponse {
         layout.header_dashboard(&title);
 
         if self.history.is_empty() {
-            layout.info("No history available for this file");
+            layout.info("No history available for this project/file");
             return Ok(());
         }
 
-        // Show activity graph
-        let graph =
+        // Use the Timeline component which handles grouping, connections and pagination
+        let mut timeline =
             Timeline::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
-        let _ = graph.text();
-
-        layout.empty();
-
-        // Group history by date
-        let mut grouped: std::collections::HashMap<String, Vec<&SnapshotInfo>> =
-            std::collections::HashMap::new();
-
-        for snapshot in &self.history {
-            let date = &snapshot.timestamp[..10]; // YYYY-MM-DD
-            grouped.entry(date.to_string()).or_default().push(snapshot);
-        }
-
-        // Paginate
-        let total_items = self.history.len();
-        let total_pages = (total_items as f64 / self.limit as f64).ceil() as usize;
-        let offset = (self.page.saturating_sub(1)) * self.limit;
-
-        let mut sorted_dates: Vec<String> = grouped.keys().cloned().collect();
-        sorted_dates.sort();
-        sorted_dates.reverse();
-
-        let mut count = 0;
-        for date in sorted_dates {
-            if count < offset {
-                count += grouped[&date].len();
-                continue;
-            }
-
-            if count >= offset + self.limit {
-                break;
-            }
-
-            let snapshots = &grouped[&date];
-            layout.section_start("hi", &format!("{} - {} snapshots", date, snapshots.len()));
-
-            for snap in snapshots {
-                let time = &snap.timestamp[11..19]; // HH:MM:SS
-                let short_hash = &snap.content_hash[..8];
-
-                let clickable_hash =
-                    crate::ui::Hyperlink::action(short_hash, "open", &snap.content_hash);
-
-                let meta = format!(
-                    "{} | {}",
-                    time,
-                    snap.git_branch.as_deref().unwrap_or("main").to_string()
-                );
-
-                layout.row_snapshot(&clickable_hash, &meta);
-            }
-
-            layout.section_end();
-            count += snapshots.len();
-        }
-
-        if total_pages > 1 {
-            layout.empty();
-            layout.info(&format!("Page {} of {}", self.page, total_pages));
-        }
+        timeline.page = self.page;
+        timeline.limit = self.limit;
+        
+        timeline.text()?;
 
         Ok(())
     }
@@ -111,6 +55,7 @@ impl Renderable for HistoryResponse {
 
 /// View and manage file history
 #[derive(Args, Clone, Debug)]
+#[command(alias = "h")]
 pub struct HistoryCommand {
     /// Specific file to view history for
     file: Option<String>,
@@ -279,7 +224,8 @@ impl HistoryCommand {
     }
 }
 
-fn handle_timeline_view(file: Option<&str>, layout: &Layout) -> Result<()> {
+fn handle_timeline_view(file: Option<&str>, _layout: &Layout) -> Result<()> {
+    use crate::ui::components::timeline::Timeline;
     let cwd = std::env::current_dir()?;
     let base_dir = get_base_dir()?;
     let project_path = cwd.clone();
@@ -287,7 +233,8 @@ fn handle_timeline_view(file: Option<&str>, layout: &Layout) -> Result<()> {
     let repo = match Repository::open(base_dir, project_path) {
         Ok(r) => r,
         Err(_) => {
-            layout.error("Cannot open repository");
+            let l = Layout::new();
+            l.error("Cannot open repository");
             return Ok(());
         }
     };
@@ -295,15 +242,10 @@ fn handle_timeline_view(file: Option<&str>, layout: &Layout) -> Result<()> {
     let history = repo.get_recent_activity(50)?;
 
     if history.is_empty() {
-        layout.info("No recent activity");
+        let l = Layout::new();
+        l.info("No recent activity");
         return Ok(());
     }
-
-    layout.header_dashboard("TIMELINE VIEW");
-
-    // Group by file
-    let mut file_activity: std::collections::HashMap<String, Vec<&SnapshotInfo>> =
-        std::collections::HashMap::new();
 
     let history_infos: Vec<SnapshotInfo> = history
         .into_iter()
@@ -319,41 +261,14 @@ fn handle_timeline_view(file: Option<&str>, layout: &Layout) -> Result<()> {
         })
         .collect();
 
-    for snap in history_infos.iter() {
-        file_activity
-            .entry(snap.file_path.clone())
-            .or_default()
-            .push(snap);
-    }
-
-    let mut files: Vec<&String> = file_activity.keys().collect();
-    files.sort();
-
-    for file_path in files {
-        let snapshots = &file_activity[file_path];
-        let filename = std::path::Path::new(file_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| file_path.clone());
-
-        layout.section_start("tl", &filename);
-
-        for snap in snapshots.iter().take(5) {
-            let time = &snap.timestamp[11..19];
-            let short_hash = &snap.content_hash[..8];
-
-            let clickable_hash =
-                crate::ui::Hyperlink::action(short_hash, "open", &snap.content_hash);
-
-            layout.row_snapshot(&clickable_hash, time);
-        }
-
-        if snapshots.len() > 5 {
-            layout.info(&format!("+ {} more changes", snapshots.len() - 5));
-        }
-
-        layout.section_end();
-    }
+    let timeline = Timeline::new(
+        "TIMELINE VIEW",
+        history_infos,
+        cwd.clone(),
+        file.map(|f| f.to_string()),
+    );
+    
+    timeline.text()?;
 
     Ok(())
 }

@@ -1,4 +1,5 @@
 use crate::theme::Theme;
+use crate::ui::components::pagination::PaginationInfo;
 use crossterm::style::Stylize;
 
 /// Column configuration for the Smart Table
@@ -88,5 +89,35 @@ impl Table {
         }
 
         println!("  {}", row_str);
+    }
+
+    /// Display pagination information footer
+    pub fn pagination(&self, info: &PaginationInfo) {
+        let total_pages = info.total_pages();
+
+        let mut parts = vec![
+            format!(
+                "{} {}/{}",
+                "PAGE".with(self.theme.text_dim).bold(),
+                info.current_page.to_string().with(self.theme.text_bright),
+                total_pages.to_string().with(self.theme.text_dim)
+            ),
+            format!(
+                "{} {}",
+                "TOTAL".with(self.theme.text_dim).bold(),
+                info.total_items.to_string().with(self.theme.text_bright)
+            ),
+        ];
+
+        for (label, value) in &info.additional_info {
+            parts.push(format!(
+                "{} {}",
+                label.as_str().with(self.theme.text_dim).bold(),
+                value.as_str().with(self.theme.text_bright)
+            ));
+        }
+
+        println!();
+        println!("  {}", parts.join("  "));
     }
 }

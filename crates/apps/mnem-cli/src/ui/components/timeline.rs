@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossterm::style::Stylize;
 use std::path::{Path, PathBuf};
 
-use crate::ui::{Layout, List, PaginationInfo, Renderable, KeyHint, DiffBar};
+use crate::ui::{DiffBar, KeyHint, Layout, List, PaginationInfo, Renderable, Table};
 use mnem_core::protocol::SnapshotInfo;
 
 /// Timeline component for displaying a chronological sequence of snapshots
@@ -39,6 +39,13 @@ impl Timeline {
             timestamp.to_string()
         }
     }
+
+    /// Display pagination information footer using the Table component's logic
+    /// or a direct consistent implementation.
+    pub fn pagination(&self, info: &PaginationInfo, theme: &crate::theme::Theme) {
+        let table = Table::new(theme.clone(), vec![]);
+        table.pagination(info);
+    }
 }
 
 impl Renderable for Timeline {
@@ -71,10 +78,10 @@ impl Renderable for Timeline {
 
         let mut first_branch = true;
         let mut current_block_id: Option<String> = None;
-        let diff_bar = DiffBar::new(theme.clone());
+        let _diff_bar = DiffBar::new(theme.clone());
 
         for (idx, snap) in paged_items.iter().enumerate() {
-            let global_idx = offset + idx + 1;
+            let _global_idx = offset + idx + 1;
             let hash = snap.content_hash.get(0..7).unwrap_or("unknown");
             let time = Self::format_time(&snap.timestamp);
             let is_latest = self.page == 1 && idx == 0;
@@ -100,7 +107,7 @@ impl Renderable for Timeline {
                     layout.graph_connector();
                 }
 
-                if let Some(ref ch) = snap.commit_hash {
+                if let Some(ref _ch) = snap.commit_hash {
                     let msg = snap.commit_message.as_deref().unwrap_or("Git Commit");
                     layout.graph_block_header("G", msg, theme.timeline_purple);
                 } else if let Some(ref cp) = snap.checkpoint_name {
@@ -146,15 +153,12 @@ impl Renderable for Timeline {
             };
 
             let display_meta = if self.target_file.is_some() {
-                format!("[{}] {}", global_idx, meta)
+                format!("[{}] {}", offset + idx + 1, meta)
             } else {
                 meta
             };
 
             layout.graph_node(hash, &display_meta, is_latest, &time, Some(icon), color);
-            
-            // Add DiffBar if we have stats (simulated for now or if protocol supports it)
-            // diff_bar.render(10, 2); // Example integration
         }
 
         // 4. Draw Root (Base)
@@ -177,11 +181,10 @@ impl Renderable for Timeline {
         }
 
         // 5. Discrete Footer
-        let list = List::new(theme.clone());
         let file_name = self.target_file.as_deref().unwrap_or("Project").to_string();
         let info = PaginationInfo::new(self.page, total_count, self.limit)
             .with_info("FILE".to_string(), file_name);
-        list.pagination(&info);
+        self.pagination(&info, &theme);
 
         // 6. Shortcuts Hint
         let key_hint = KeyHint::new(theme.clone());

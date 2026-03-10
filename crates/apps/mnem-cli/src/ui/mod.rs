@@ -12,7 +12,7 @@ pub use layout::LayoutBuilder;
 pub use presentable::Renderable;
 
 pub use components::{
-    Timeline, Banner, BranchBadge, Breadcrumbs, Card, CodeBlock, Column, DiffBar, Elements,
-    Gauge, Highlight, Hyperlink, KeyHint, List, Messages, MetadataGrid, PaginationInfo, Spinner,
-    Status, StepProgress, Table,
+    Banner, BranchBadge, Breadcrumbs, Card, CodeBlock, Column, DiffBar, DiffView, Elements, Gauge,
+    Highlight, Hyperlink, KeyHint, List, Messages, MetadataGrid, PaginationInfo, Spinner,
+    StepProgress, Table, Timeline,
 };

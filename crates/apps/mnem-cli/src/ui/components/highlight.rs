@@ -17,10 +17,14 @@ impl Highlight {
         if pattern.is_empty() {
             return input.to_string();
         }
-        
+
         input.replace(
             pattern,
-            &pattern.with(self.theme.active).bold().underlined().to_string()
+            &pattern
+                .with(self.theme.active)
+                .bold()
+                .underlined()
+                .to_string(),
         )
     }
 }
