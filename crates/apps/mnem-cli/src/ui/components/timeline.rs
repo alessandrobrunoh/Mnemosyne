@@ -1,13 +1,12 @@
 use anyhow::Result;
 use crossterm::style::Stylize;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::ui::components::table::{PaginationInfo, Table};
-use crate::ui::{Layout, Renderable};
+use crate::ui::{Layout, List, PaginationInfo, Renderable, KeyHint, DiffBar};
 use mnem_core::protocol::SnapshotInfo;
 
-pub struct ActivityGraph {
+/// Timeline component for displaying a chronological sequence of snapshots
+pub struct Timeline {
     pub title: String,
     pub snapshots: Vec<SnapshotInfo>,
     pub project_path: PathBuf,
@@ -16,7 +15,7 @@ pub struct ActivityGraph {
     pub page: usize,
 }
 
-impl ActivityGraph {
+impl Timeline {
     pub fn new(
         title: &str,
         snapshots: Vec<SnapshotInfo>,
@@ -42,7 +41,7 @@ impl ActivityGraph {
     }
 }
 
-impl Renderable for ActivityGraph {
+impl Renderable for Timeline {
     fn text(&self) -> Result<()> {
         let layout = Layout::new();
         let theme = layout.theme();
@@ -70,9 +69,9 @@ impl Renderable for ActivityGraph {
             return Ok(());
         }
 
-        // Butler inspired: "active changes" for unstaged snapshots
         let mut first_branch = true;
         let mut current_block_id: Option<String> = None;
+        let diff_bar = DiffBar::new(theme.clone());
 
         for (idx, snap) in paged_items.iter().enumerate() {
             let global_idx = offset + idx + 1;
@@ -153,6 +152,9 @@ impl Renderable for ActivityGraph {
             };
 
             layout.graph_node(hash, &display_meta, is_latest, &time, Some(icon), color);
+            
+            // Add DiffBar if we have stats (simulated for now or if protocol supports it)
+            // diff_bar.render(10, 2); // Example integration
         }
 
         // 4. Draw Root (Base)
@@ -175,11 +177,20 @@ impl Renderable for ActivityGraph {
         }
 
         // 5. Discrete Footer
-        let table = Table::new(theme.clone());
+        let list = List::new(theme.clone());
         let file_name = self.target_file.as_deref().unwrap_or("Project").to_string();
         let info = PaginationInfo::new(self.page, total_count, self.limit)
             .with_info("FILE".to_string(), file_name);
-        table.pagination(&info);
+        list.pagination(&info);
+
+        // 6. Shortcuts Hint
+        let key_hint = KeyHint::new(theme.clone());
+        key_hint.show(&[
+            ("ENTER", "view"),
+            ("r", "restore"),
+            ("d", "diff"),
+            ("q", "quit"),
+        ]);
 
         layout.legend(&[
             ("●", "Latest"),

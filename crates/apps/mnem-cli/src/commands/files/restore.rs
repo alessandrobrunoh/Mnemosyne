@@ -28,12 +28,12 @@ pub struct RestoreResponse {
 
 impl Renderable for RestoreResponse {
     fn text(&self) -> Result<()> {
-        use crate::ui::components::activity_graph::ActivityGraph;
+        use crate::ui::components::timeline::Timeline;
 
         if let Some(history) = &self.history {
             if let Some(f) = &self.file {
                 let cwd = std::env::current_dir()?;
-                let mut graph = ActivityGraph::new(
+                let mut graph = Timeline::new(
                     &format!("RESTORE VERSIONS: {}", f),
                     history.clone(),
                     cwd,

@@ -24,7 +24,7 @@ pub struct HistoryResponse {
 
 impl Renderable for HistoryResponse {
     fn text(&self) -> Result<()> {
-        use crate::ui::components::activity_graph::ActivityGraph;
+        use crate::ui::components::timeline::Timeline;
         let cwd = std::env::current_dir()?;
 
         let title = if let Some(ref f) = self.file {
@@ -43,7 +43,7 @@ impl Renderable for HistoryResponse {
 
         // Show activity graph
         let graph =
-            ActivityGraph::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
+            Timeline::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
         let _ = graph.text();
 
         layout.empty();
