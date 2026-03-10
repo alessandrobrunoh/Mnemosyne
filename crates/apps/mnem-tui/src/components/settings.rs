@@ -2,11 +2,11 @@ use crate::app::AppState;
 use crate::components::shared::{ComponentFocus, ZedBlock};
 use crate::theme::THEMES;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{List, ListItem, Paragraph},
-    Frame,
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -26,10 +26,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .split(inner_area);
 
     let options = vec![
-        ("Retention", format!("{} days", state.config.retention_days)),
+        (
+            "Retention",
+            format!("{} days", state.config.storage.retention_days),
+        ),
         (
             "Compression",
-            if state.config.compression_enabled {
+            if state.config.storage.compression_enabled {
                 "Enabled".to_string()
             } else {
                 "Disabled".to_string()
@@ -37,14 +40,17 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         (
             "Mnemosyneignore",
-            if state.config.use_mnemosyneignore {
+            if state.config.storage.use_mnemosyneignore {
                 "Active".to_string()
             } else {
                 "Inactive".to_string()
             },
         ),
-        ("Theme", THEMES[state.config.theme_index].name.to_string()),
-        ("Primary IDE", state.config.ide.as_str().to_string()),
+        (
+            "Theme",
+            THEMES[state.config.ui.theme_index].name.to_string(),
+        ),
+        ("Primary IDE", state.config.editor.ide.as_str().to_string()),
         ("Maintenance", "Run Garbage Collection".to_string()),
         ("Storage", "Clear All History (Danger)".to_string()),
     ];

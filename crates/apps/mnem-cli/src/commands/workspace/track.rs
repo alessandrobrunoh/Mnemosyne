@@ -14,6 +14,8 @@ pub struct TrackResponse {
     pub total_projects: usize,
     pub limit: usize,
     pub page: usize,
+    #[serde(skip)]
+    pub action: String,
 }
 
 #[derive(Serialize)]
@@ -58,19 +60,35 @@ impl Presentable for TrackResponse {
                 "Listing".with(theme.text_bright)
             );
         } else if let Some(current) = &self.current {
-            layout.graph_branch_start("workspace: project tracking");
-            layout.graph_node(
-                &current.id,
-                &current.name,
-                true,
-                "now tracking",
-                Some("✓"),
-                theme.success_bright
-            );
-            layout.graph_file_change(&current.path, "root");
-            layout.graph_branch_end();
-            layout.empty();
-            layout.badge_success("OK", &self.message);
+            if self.action == "remove" {
+                layout.graph_branch_start("workspace: project tracking");
+                layout.graph_node(
+                    &current.id,
+                    &current.name,
+                    false,
+                    "stopped tracking",
+                    Some("x"),
+                    theme.error
+                );
+                layout.graph_file_change(&current.path, "root");
+                layout.graph_branch_end();
+                layout.empty();
+                layout.badge_success("OK", &self.message);
+            } else {
+                layout.graph_branch_start("workspace: project tracking");
+                layout.graph_node(
+                    &current.id,
+                    &current.name,
+                    true,
+                    "now tracking",
+                    Some("✓"),
+                    theme.success_bright
+                );
+                layout.graph_file_change(&current.path, "root");
+                layout.graph_branch_end();
+                layout.empty();
+                layout.badge_success("OK", &self.message);
+            }
         } else {
             layout.graph_branch_start("workspace");
             layout.graph_node(
@@ -83,7 +101,11 @@ impl Presentable for TrackResponse {
             );
             layout.graph_branch_end();
             layout.empty();
-            layout.info("Use 'mnem track' in a project directory to start tracking");
+            if self.action == "remove" {
+                layout.success_bright(&self.message);
+            } else {
+                layout.info("Use 'mnem track' in a project directory to start tracking");
+            }
         }
 
         Ok(())
@@ -94,7 +116,7 @@ impl Presentable for TrackResponse {
     }
 }
 
-pub fn handle_track(list: bool, _remove: bool, _id: Option<String>, limit: usize, page: usize, json: bool) -> Result<()> {
+pub fn handle_track(list: bool, remove: bool, purge: bool, id: Option<String>, limit: usize, page: usize, json: bool) -> Result<()> {
     use mnem_core::client::daemon_running;
     use mnem_core::env::get_base_dir;
     use mnem_core::protocol::methods;
@@ -127,6 +149,7 @@ pub fn handle_track(list: bool, _remove: bool, _id: Option<String>, limit: usize
             total_projects,
             limit,
             page,
+            action: "list".to_string(),
         };
 
         if json {
@@ -138,6 +161,83 @@ pub fn handle_track(list: bool, _remove: bool, _id: Option<String>, limit: usize
     }
 
     let cwd = std::env::current_dir()?;
+
+    if remove || purge {
+        let project_id = if let Some(ref custom_id) = id {
+            Some(custom_id.clone())
+        } else {
+            let tracked_file = cwd.join(".mnemosyne").join("tracked");
+            if tracked_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&tracked_file) {
+                    content
+                        .lines()
+                        .find(|l| l.starts_with("project_id:"))
+                        .and_then(|l| l.split(':').nth(1))
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            } else {
+                // Not tracked locally, try finding by path
+                registry.list_projects().into_iter()
+                    .find(|p| p.path == cwd.to_string_lossy().to_string())
+                    .map(|p| p.id)
+            }
+        };
+
+        let mut project_info = None;
+        let mut message = "Project not found or not tracked".to_string();
+        let mut success = false;
+
+        if let Some(pid) = project_id {
+            if let Ok(Some(removed_project)) = registry.remove(&pid) {
+                project_info = Some(ProjectInfo {
+                    name: removed_project.name,
+                    path: removed_project.path,
+                    id: removed_project.id,
+                });
+                
+                success = true;
+                message = "Project removed from tracking".to_string();
+
+                if purge {
+                    let mnem_dir = cwd.join(".mnemosyne");
+                    if mnem_dir.exists() {
+                        if let Err(e) = std::fs::remove_dir_all(&mnem_dir) {
+                            message = format!("Removed from tracking, but failed to delete .mnemosyne: {}", e);
+                        } else {
+                            message = "Project untracked and local history purged successfully".to_string();
+                        }
+                    }
+                }
+
+                // Notify daemon to reload projects
+                if daemon_running() {
+                    if let Ok(mut client) = mnem_core::client::DaemonClient::connect() {
+                        let _ = client.call(methods::PROJECT_RELOAD, serde_json::Value::Null);
+                    }
+                }
+            }
+        }
+
+        let response = TrackResponse {
+            success,
+            projects: vec![],
+            current: project_info,
+            message,
+            total_projects: 0,
+            limit,
+            page,
+            action: "remove".to_string(),
+        };
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+        } else {
+            response.render_tui()?;
+        }
+        return Ok(());
+    }
 
     if !daemon_running() {
         mnem_core::client::ensure_daemon()?;
@@ -176,6 +276,7 @@ pub fn handle_track(list: bool, _remove: bool, _id: Option<String>, limit: usize
         total_projects: 0,
         limit,
         page,
+        action: "track".to_string(),
     };
 
     if json {

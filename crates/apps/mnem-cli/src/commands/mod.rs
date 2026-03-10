@@ -39,6 +39,8 @@ pub enum Commands {
         #[arg(short, long)]
         remove: bool,
         #[arg(short, long)]
+        purge: bool,
+        #[arg(short, long)]
         id: Option<String>,
         #[arg(short, long, default_value = "20")]
         limit: usize,
@@ -58,6 +60,8 @@ pub enum Commands {
         since: Option<String>,
         #[arg(short, long)]
         branch: Option<String>,
+        #[arg(short, long)]
+        clear: bool,
     },
     #[command(about = "Restore file", visible_alias = "restore")]
     R {

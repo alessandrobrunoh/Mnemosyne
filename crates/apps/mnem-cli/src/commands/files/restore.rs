@@ -27,7 +27,7 @@ pub struct RestoreResponse {
 impl Presentable for RestoreResponse {
     fn render_tui(&self) -> Result<()> {
         use crate::ui::components::activity_graph::ActivityGraph;
-        
+
         if let Some(history) = &self.history {
             if let Some(f) = &self.file {
                 let cwd = std::env::current_dir()?;
@@ -35,13 +35,14 @@ impl Presentable for RestoreResponse {
                     &format!("RESTORE VERSIONS: {}", f),
                     history.clone(),
                     cwd,
-                    Some(f.clone())
+                    Some(f.clone()),
                 );
                 graph.limit = self.limit;
                 graph.page = self.page;
                 graph.render_tui()?;
                 println!();
-                Layout::new().info("Use 'mnem r <file> [version_number]' to restore a specific version.");
+                Layout::new()
+                    .info("Use 'mnem r <file> [version_number]' to restore a specific version.");
                 return Ok(());
             }
         }
@@ -147,7 +148,7 @@ pub fn handle_r(
 
     let base_dir = get_base_dir()?;
     let config = ConfigManager::new(&base_dir)?;
-    let _ide = config.config.ide;
+    let _ide = config.config.editor.ide;
 
     cleanup_old_temp_files();
 
@@ -214,7 +215,10 @@ pub fn handle_r(
         };
 
         if json {
-            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.render_json()?)?
+            );
         } else {
             response.render_tui()?;
         }
@@ -266,7 +270,10 @@ pub fn handle_r(
         };
 
         if json {
-            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.render_json()?)?
+            );
         } else {
             response.render_tui()?;
         }
@@ -331,11 +338,7 @@ pub fn handle_r(
                 &hash[..8.min(hash.len())]
             )
         } else {
-            format!(
-                "Restored {} to {}",
-                clean_path,
-                &hash[..8.min(hash.len())]
-            )
+            format!("Restored {} to {}", clean_path, &hash[..8.min(hash.len())])
         };
     } else if let Some(v) = version {
         let history = get_history_for_restore(
@@ -384,7 +387,10 @@ pub fn handle_r(
     };
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&response.render_json()?)?
+        );
     } else {
         response.render_tui()?;
     }

@@ -1,4 +1,3 @@
-
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::Value;
@@ -15,39 +14,143 @@ pub struct ConfigResponse {
 
 #[derive(Serialize)]
 pub struct ConfigData {
+    pub storage: StorageConfig,
+    pub ui: UiConfig,
+    pub editor: EditorConfig,
+}
+
+#[derive(Serialize)]
+pub struct StorageConfig {
+    pub retention_days: u64,
+    pub compression_enabled: bool,
+    pub use_mnemosyneignore: bool,
+    pub max_file_size_mb: u64,
+}
+
+#[derive(Serialize)]
+pub struct UiConfig {
+    pub theme_index: usize,
+}
+
+#[derive(Serialize)]
+pub struct EditorConfig {
     pub ide: String,
-    pub max_file_size_mb: usize,
-    pub retention_days: usize,
 }
 
 impl Presentable for ConfigResponse {
     fn render_tui(&self) -> Result<()> {
         let layout = Layout::new();
+        let theme = layout.theme();
+
         if let Some(config) = &self.config {
-            layout.header_dashboard("CONFIGURATION");
-            layout.section_timeline("cf", "Current Settings");
-            layout.row_labeled("◆", "IDE", &config.ide);
-            layout.row_labeled(
-                "◫",
-                "Max File Size",
-                &format!("{} MB", config.max_file_size_mb),
+            layout.graph_branch_start("config: Mnemosyne");
+
+            // Storage section
+            layout.graph_connector();
+            layout.graph_block_header("💾", "storage", theme.timeline_cyan);
+            layout.graph_node(
+                &config.storage.retention_days.to_string(),
+                "RETENTION DAYS",
+                false,
+                "days",
+                None,
+                theme.text_dim,
             );
-            layout.row_labeled(
-                "◷",
-                "Retention Days",
-                &config.retention_days.to_string(),
+            layout.graph_node(
+                &format!("{} MB", config.storage.max_file_size_mb),
+                "MAX FILE SIZE",
+                false,
+                "limit",
+                None,
+                theme.text_dim,
             );
-            layout.section_end();
+            layout.graph_node(
+                &format!("{}", config.storage.compression_enabled),
+                "COMPRESSION",
+                false,
+                if config.storage.compression_enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                None,
+                theme.text_dim,
+            );
+            layout.graph_node(
+                &format!("{}", config.storage.use_mnemosyneignore),
+                "USE IGNORE",
+                false,
+                if config.storage.use_mnemosyneignore {
+                    "active"
+                } else {
+                    "inactive"
+                },
+                None,
+                theme.text_dim,
+            );
+
+            // UI section
+            layout.graph_connector();
+            layout.graph_block_header("🎨", "ui", theme.success_bright);
+            layout.graph_node(
+                &config.ui.theme_index.to_string(),
+                "THEME INDEX",
+                false,
+                "active",
+                None,
+                theme.text_dim,
+            );
+
+            // Editor section
+            layout.graph_connector();
+            layout.graph_block_header("✏️", "editor", theme.timeline_purple);
+            layout.graph_node(
+                &config.editor.ide,
+                "PRIMARY IDE",
+                false,
+                "active",
+                None,
+                theme.text_dim,
+            );
+
+            layout.graph_branch_end();
+
+            // Tips
             layout.empty();
             layout.badge_info(
-                "TIP",
-                "Use 'mnem config --set key=value' to change settings",
+                "USAGE",
+                "mnem config --get <key> | --set <key>=<value> | --reset",
             );
+            layout.badge_info("EXAMPLES", "mnem config --get storage.retention_days");
+            layout.badge_info("EXAMPLES", "mnem config --set storage.retention_days=60");
         } else if self.success {
-            layout.success_bright(&self.message);
+            layout.graph_branch_start("config: Mnemosyne");
+            layout.graph_node(
+                "SUCCESS",
+                "STATUS",
+                true,
+                "updated",
+                None,
+                theme.success_bright,
+            );
+            layout.graph_branch_end();
+            layout.empty();
+            layout.info(&self.message);
         } else {
+            layout.graph_branch_start("config: Mnemosyne");
+            layout.graph_node(
+                "ERROR",
+                "STATUS",
+                true,
+                "failed",
+                None,
+                crossterm::style::Color::Red,
+            );
+            layout.graph_branch_end();
+            layout.empty();
             layout.error(&self.message);
         }
+
         Ok(())
     }
 
@@ -56,53 +159,61 @@ impl Presentable for ConfigResponse {
     }
 }
 
-pub fn handle_config(get: Option<String>, set: Option<String>, reset: bool, json: bool) -> Result<()> {
+pub fn handle_config(
+    get: Option<String>,
+    set: Option<String>,
+    reset: bool,
+    json: bool,
+) -> Result<()> {
     use mnem_core::config::ConfigManager;
     use mnem_core::env::get_base_dir;
 
     let base_dir = get_base_dir()?;
-    let config_manager = ConfigManager::new(&base_dir)?;
+    let mut config_manager = ConfigManager::new(&base_dir)?;
 
     if reset {
+        // Reset by removing the config file and letting it recreate with defaults
+        let config_path = base_dir.join("config.toml");
+        if config_path.exists() {
+            std::fs::remove_file(&config_path)?;
+        }
+        config_manager = ConfigManager::new(&base_dir)?;
+
         let response = ConfigResponse {
             success: true,
             message: "Config reset to defaults".to_string(),
             config: None,
         };
+
         if json {
-            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.render_json()?)?
+            );
         } else {
-            Layout::new().header_dashboard("CONFIG");
-            Layout::new().info("Resetting config to defaults...");
             response.render_tui()?;
         }
         return Ok(());
     }
 
     if let Some(key) = get {
-        let value = match key.as_str() {
-            "ide" => config_manager.config.ide.as_str().to_string(),
-            "max-file-size" => config_manager.config.max_file_size_mb.to_string(),
-            "retention-days" => config_manager.config.retention_days.to_string(),
-            _ => {
-                let err_msg = format!("Unknown config key: {}", key);
-                if json {
-                    println!("{}", serde_json::json!({ "success": false, "error": err_msg }));
-                } else {
-                    Layout::new().error(&err_msg);
-                }
-                return Ok(());
-            }
-        };
+        // Support both new nested keys and legacy flat keys
+        let normalized_key = normalize_key(key.as_str());
+        let value = config_manager
+            .get_value(&normalized_key)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         if json {
-            println!("{}", serde_json::json!({ "success": true, "key": key, "value": value }));
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "key": key, "value": value })
+            );
         } else {
             let layout = Layout::new();
-            layout.header_dashboard("CONFIG");
-            layout.section_timeline("cf", "Setting");
-            layout.row_labeled("◆", &key, &value);
-            layout.section_end();
+            let theme = layout.theme();
+            layout.graph_branch_start(&format!("config: {}", key));
+            layout.graph_node(&value, "VALUE", true, "current", None, theme.success_bright);
+            layout.graph_branch_end();
         }
         return Ok(());
     }
@@ -110,44 +221,123 @@ pub fn handle_config(get: Option<String>, set: Option<String>, reset: bool, json
     if let Some(key_value) = set {
         let parts: Vec<&str> = key_value.splitn(2, '=').collect();
         if parts.len() != 2 {
+            let err_msg = "Usage: mnem config --set key=value".to_string();
             if json {
-                println!("{}", serde_json::json!({ "success": false, "error": "Usage: mnem config --set key=value" }));
+                println!(
+                    "{}",
+                    serde_json::json!({ "success": false, "error": err_msg })
+                );
             } else {
-                Layout::new().error("Usage: mnem config --set key=value");
+                let layout = Layout::new();
+                layout.graph_branch_start("config: Mnemosyne");
+                layout.graph_node(
+                    "ERROR",
+                    "STATUS",
+                    true,
+                    "invalid",
+                    None,
+                    crossterm::style::Color::Red,
+                );
+                layout.graph_branch_end();
+                layout.empty();
+                layout.error(&err_msg);
             }
             return Ok(());
         }
 
-        let response = ConfigResponse {
-            success: true,
-            message: format!("Set {} = {}", parts[0], parts[1]),
-            config: None,
-        };
+        let key = parts[0].trim();
+        let value = parts[1].trim();
 
-        if json {
-            println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
-        } else {
-            Layout::new().header_dashboard("CONFIG");
-            response.render_tui()?;
+        // Normalize the key and set the value
+        let normalized_key = normalize_key(key);
+
+        match config_manager.set_value(&normalized_key, value) {
+            Ok(_) => {
+                let response = ConfigResponse {
+                    success: true,
+                    message: format!("Set {} = {}", key, value),
+                    config: None,
+                };
+
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&response.render_json()?)?
+                    );
+                } else {
+                    response.render_tui()?;
+                }
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to set config: {}", e);
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "success": false, "error": err_msg })
+                    );
+                } else {
+                    let layout = Layout::new();
+                    layout.graph_branch_start("config: Mnemosyne");
+                    layout.graph_node(
+                        "ERROR",
+                        "STATUS",
+                        true,
+                        "failed",
+                        None,
+                        crossterm::style::Color::Red,
+                    );
+                    layout.graph_branch_end();
+                    layout.empty();
+                    layout.error(&err_msg);
+                }
+            }
         }
         return Ok(());
     }
 
+    // Show full config
     let response = ConfigResponse {
         success: true,
         message: "Current configuration".to_string(),
         config: Some(ConfigData {
-            ide: config_manager.config.ide.as_str().to_string(),
-            max_file_size_mb: config_manager.config.max_file_size_mb as usize,
-            retention_days: config_manager.config.retention_days as usize,
+            storage: StorageConfig {
+                retention_days: config_manager.config.storage.retention_days,
+                compression_enabled: config_manager.config.storage.compression_enabled,
+                use_mnemosyneignore: config_manager.config.storage.use_mnemosyneignore,
+                max_file_size_mb: config_manager.config.storage.max_file_size_mb,
+            },
+            ui: UiConfig {
+                theme_index: config_manager.config.ui.theme_index,
+            },
+            editor: EditorConfig {
+                ide: config_manager.config.editor.ide.as_str().to_string(),
+            },
         }),
     };
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&response.render_json()?)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&response.render_json()?)?
+        );
     } else {
         response.render_tui()?;
     }
 
     Ok(())
+}
+
+/// Normalize legacy flat keys to new nested keys for backwards compatibility
+fn normalize_key(key: &str) -> String {
+    match key {
+        // Legacy flat keys -> new nested keys
+        "retention-days" | "retention_days" => "storage.retention_days".to_string(),
+        "compression" | "compression_enabled" => "storage.compression_enabled".to_string(),
+        "use-ignore" | "use_mnemosyneignore" => "storage.use_mnemosyneignore".to_string(),
+        "max-file-size" | "max_file_size_mb" => "storage.max_file_size_mb".to_string(),
+        "theme" | "theme_index" => "ui.theme_index".to_string(),
+        "ide" => "editor.ide".to_string(),
+        // Already nested keys - return as is
+        _ => key.to_string(),
+    }
 }

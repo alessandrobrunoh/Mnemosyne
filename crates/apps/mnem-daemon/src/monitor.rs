@@ -79,6 +79,7 @@ impl Monitor {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .config
+            .storage
             .max_file_size_mb;
         let max_file_size = config_max_size * 1024 * 1024;
 
@@ -254,6 +255,7 @@ impl Monitor {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .config
+            .storage
             .max_file_size_mb
             * 1024
             * 1024;
@@ -318,7 +320,7 @@ impl Monitor {
         }
 
         // 2. Project-level .mnemignore
-        if config.use_mnemosyneignore {
+        if config.storage.use_mnemosyneignore {
             if let Some(ignore_path) =
                 Some(self.root_path.join(".mnemosyneignore")).filter(|p| p.exists())
             {

@@ -223,9 +223,13 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             let projects = registry.list_projects();
             let total = projects.len();
             let mut loaded = 0;
+            let mut unloaded = 0;
+            let mut current_paths = std::collections::HashSet::new();
 
-            for project in projects {
+            for project in &projects {
                 let project_path = std::path::PathBuf::from(&project.path);
+                current_paths.insert(project.path.clone());
+                
                 if !project_path.exists() {
                     continue;
                 }
@@ -271,7 +275,70 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 }
             }
 
-            JsonRpcResponse::success(req.id, json!({"loaded": loaded, "total": total}))
+            // Remove tracked projects that are no longer in the registry
+            let mut paths_to_remove = Vec::new();
+            for item in state.repos.iter() {
+                if !current_paths.contains(item.key()) {
+                    paths_to_remove.push(item.key().clone());
+                }
+            }
+            
+            for p in paths_to_remove {
+                state.monitors.remove(&p);
+                state.repos.remove(&p);
+                unloaded += 1;
+                info!("Unloaded project: {}", p);
+            }
+
+            JsonRpcResponse::success(req.id, json!({"loaded": loaded, "total": total, "unloaded": unloaded}))
+        }
+
+        protocol::methods::PROJECT_CLEAR_HISTORY => {
+            let params: protocol::ClearHistoryParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        req.id,
+                        -32602,
+                        format!("Invalid params: {}", e),
+                    );
+                }
+            };
+
+            let project_path = params.project_path;
+
+            // Stop monitor and drop repo reference if exists so we can clear safely
+            state.monitors.remove(&project_path);
+
+            let mut cleared_count = 0;
+            if let Some((_, repo)) = state.repos.remove(&project_path) {
+                match repo.clear_all_history() {
+                    Ok(count) => {
+                        cleared_count = count;
+                    }
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32000,
+                            format!("Failed to clear history: {}", e),
+                        );
+                    }
+                }
+            } else {
+                // If not in state, let's just try to open it and clear
+                let base_dir = match get_base_dir() {
+                    Ok(d) => d,
+                    Err(e) => return JsonRpcResponse::error(req.id, -32603, format!("Base dir error: {}", e)),
+                };
+                let pb = std::path::PathBuf::from(&project_path);
+                if let Ok(repo) = Repository::open(base_dir, pb) {
+                    cleared_count = repo.clear_all_history().unwrap_or(0);
+                }
+            }
+
+            state.history_cache.write().clear();
+
+            JsonRpcResponse::success(req.id, json!({"cleared_snapshots": cleared_count, "project": project_path}))
         }
 
         protocol::methods::WATCH | protocol::methods::PROJECT_WATCH => {
@@ -437,20 +504,73 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 state.repos.iter().count()
             );
 
+            // Find the most specific repo (longest matching path)
+            let mut best_match: Option<(usize, Arc<Repository>)> = None;
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
-                info!(
-                    "SNAPSHOT_LIST: Checking if {:?} starts with {:?}",
-                    file_path, project_path
-                );
-
+                
                 if file_path.starts_with(project_path) {
-                    info!("SNAPSHOT_LIST: Found matching project: {:?}", project_path);
-                    info!("SNAPSHOT_LIST: Cache hit for {:?}", params.file_path);
-                    if let Some(cached) = state.get_cached_history(&normalized_file_path) {
-                        info!("SNAPSHOT_LIST: Found {} cached versions", cached.len());
-                        let infos: Vec<protocol::SnapshotInfo> = cached
+                    let path_len = project_path.as_os_str().len();
+                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                        best_match = Some((path_len, Arc::clone(repo)));
+                    }
+                }
+            }
+
+            if let Some((_, repo)) = best_match {
+                let project_path = std::path::Path::new(&repo.project.path);
+                info!("SNAPSHOT_LIST: Found best matching project: {:?}", project_path);
+                info!("SNAPSHOT_LIST: Cache hit for {:?}", params.file_path);
+                if let Some(cached) = state.get_cached_history(&normalized_file_path) {
+                    info!("SNAPSHOT_LIST: Found {} cached versions", cached.len());
+                    let infos: Vec<protocol::SnapshotInfo> = cached
+                        .into_iter()
+                        .filter(|sn| {
+                            if let Some(ref b) = params.branch {
+                                sn.git_branch.as_ref() == Some(b)
+                            } else {
+                                true
+                            }
+                        })
+                        .map(|sn| {
+                            let commit_message = sn.commit_hash.as_ref().and_then(|h| {
+                                repo.db
+                                    .get_git_commit(h)
+                                    .ok()
+                                    .flatten()
+                                    .map(|(msg, _, _)| msg)
+                            });
+                            protocol::SnapshotInfo {
+                                id: sn.id,
+                                file_path: sn.file_path,
+                                timestamp: sn.timestamp,
+                                content_hash: sn.content_hash,
+                                git_branch: sn.git_branch,
+                                commit_hash: sn.commit_hash,
+                                commit_message,
+                                checkpoint_name: sn.checkpoint_name,
+                            }
+                        })
+                        .collect();
+                    return JsonRpcResponse::success(
+                        req.id,
+                        serde_json::to_value(infos).unwrap_or(json!([])),
+                    );
+                }
+
+                // Cache miss - fetch from database
+                info!("SNAPSHOT_LIST: Cache miss, fetching from database");
+                match repo.get_history(&normalized_file_path) {
+                    Ok(history) => {
+                        info!(
+                            "SNAPSHOT_LIST: Found {} versions in database",
+                            history.len()
+                        );
+                        // Cache the result
+                        state.cache_history(normalized_file_path.clone(), history.clone());
+
+                        let infos: Vec<protocol::SnapshotInfo> = history
                             .into_iter()
                             .filter(|sn| {
                                 if let Some(ref b) = params.branch {
@@ -484,56 +604,9 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                             serde_json::to_value(infos).unwrap_or(json!([])),
                         );
                     }
-
-                    // Cache miss - fetch from database
-                    info!("SNAPSHOT_LIST: Cache miss, fetching from database");
-                    match repo.get_history(&normalized_file_path) {
-                        Ok(history) => {
-                            info!(
-                                "SNAPSHOT_LIST: Found {} versions in database",
-                                history.len()
-                            );
-                            // Cache the result
-                            state.cache_history(normalized_file_path.clone(), history.clone());
-
-                            let infos: Vec<protocol::SnapshotInfo> = history
-                                .into_iter()
-                                .filter(|sn| {
-                                    if let Some(ref b) = params.branch {
-                                        sn.git_branch.as_ref() == Some(b)
-                                    } else {
-                                        true
-                                    }
-                                })
-                                .map(|sn| {
-                                    let commit_message = sn.commit_hash.as_ref().and_then(|h| {
-                                        repo.db
-                                            .get_git_commit(h)
-                                            .ok()
-                                            .flatten()
-                                            .map(|(msg, _, _)| msg)
-                                    });
-                                    protocol::SnapshotInfo {
-                                        id: sn.id,
-                                        file_path: sn.file_path,
-                                        timestamp: sn.timestamp,
-                                        content_hash: sn.content_hash,
-                                        git_branch: sn.git_branch,
-                                        commit_hash: sn.commit_hash,
-                                        commit_message,
-                                        checkpoint_name: sn.checkpoint_name,
-                                    }
-                                })
-                                .collect();
-                            return JsonRpcResponse::success(
-                                req.id,
-                                serde_json::to_value(infos).unwrap_or(json!([])),
-                            );
-                        }
-                        Err(e) => {
-                            error!("SNAPSHOT_LIST: Failed to get history: {}", e);
-                            return JsonRpcResponse::error(req.id, -32000, e.to_string());
-                        }
+                    Err(e) => {
+                        error!("SNAPSHOT_LIST: Failed to get history: {}", e);
+                        return JsonRpcResponse::error(req.id, -32000, e.to_string());
                     }
                 }
             }
@@ -584,27 +657,33 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 };
 
             let file_path = std::path::Path::new(&params.target_path);
+            let mut best_match: Option<(usize, std::sync::Arc<mnem_core::Repository>)> = None;
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
-
                 if file_path.starts_with(project_path) {
-                    let clean_path = params
-                        .target_path
-                        .strip_prefix(&repo.project.path)
-                        .unwrap_or(&params.target_path)
-                        .trim_start_matches('/');
-                    match repo.restore_file(&params.content_hash, clean_path) {
-                        Ok(_) => {
-                            info!("Restored {} to {}", clean_path, &params.content_hash[..8]);
-                            return JsonRpcResponse::success(
-                                req.id,
-                                json!({ "status": "restored", "hash": params.content_hash }),
-                            );
-                        }
-                        Err(e) => {
-                            return JsonRpcResponse::error(req.id, -32000, e.to_string());
-                        }
+                    let path_len = project_path.as_os_str().len();
+                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                        best_match = Some((path_len, std::sync::Arc::clone(repo)));
+                    }
+                }
+            }
+            if let Some((_, repo)) = best_match {
+                let clean_path = params
+                    .target_path
+                    .strip_prefix(&repo.project.path)
+                    .unwrap_or(&params.target_path)
+                    .trim_start_matches('/');
+                match repo.restore_file(&params.content_hash, clean_path) {
+                    Ok(_) => {
+                        info!("Restored {} to {}", clean_path, &params.content_hash[..8]);
+                        return JsonRpcResponse::success(
+                            req.id,
+                            json!({ "status": "restored", "hash": params.content_hash }),
+                        );
+                    }
+                    Err(e) => {
+                        return JsonRpcResponse::error(req.id, -32000, e.to_string());
                     }
                 }
             }
@@ -626,33 +705,39 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 };
 
             let file_path = std::path::Path::new(&params.target_path);
+            let mut best_match: Option<(usize, std::sync::Arc<mnem_core::Repository>)> = None;
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
-
                 if file_path.starts_with(project_path) {
-                    let clean_path = params
-                        .target_path
-                        .strip_prefix(&repo.project.path)
-                        .unwrap_or(&params.target_path)
-                        .trim_start_matches('/');
-                    match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name)
-                    {
-                        Ok(_) => {
-                            info!(
-                                "Restored symbol '{}' in {} to {}",
-                                params.symbol_name,
-                                clean_path,
-                                &params.content_hash[..8]
-                            );
-                            return JsonRpcResponse::success(
-                                req.id,
-                                json!({ "status": "restored", "hash": params.content_hash }),
-                            );
-                        }
-                        Err(e) => {
-                            return JsonRpcResponse::error(req.id, -32000, e.to_string());
-                        }
+                    let path_len = project_path.as_os_str().len();
+                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                        best_match = Some((path_len, std::sync::Arc::clone(repo)));
+                    }
+                }
+            }
+            if let Some((_, repo)) = best_match {
+                let clean_path = params
+                    .target_path
+                    .strip_prefix(&repo.project.path)
+                    .unwrap_or(&params.target_path)
+                    .trim_start_matches('/');
+                match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name)
+                {
+                    Ok(_) => {
+                        info!(
+                            "Restored symbol '{}' in {} to {}",
+                            params.symbol_name,
+                            clean_path,
+                            &params.content_hash[..8]
+                        );
+                        return JsonRpcResponse::success(
+                            req.id,
+                            json!({ "status": "restored", "hash": params.content_hash }),
+                        );
+                    }
+                    Err(e) => {
+                        return JsonRpcResponse::error(req.id, -32000, e.to_string());
                     }
                 }
             }
@@ -894,20 +979,28 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             let params: serde_json::Value = req.params.clone();
             let file_path = params["file_path"].as_str().unwrap_or("");
 
+            let mut best_match: Option<(usize, std::sync::Arc<mnem_core::Repository>)> = None;
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 if file_path.starts_with(&repo.project.path) {
-                    if let Ok(history) = repo.db.get_history(file_path) {
-                        if let Some(latest) = history.first() {
-                            let info = json!({
-                                "path": file_path,
-                                "snapshot_count": history.len(),
-                                "total_size_human": "Unknown",
-                                "earliest": history.last().map(|s| s.timestamp.clone()).unwrap_or_default(),
-                                "latest": latest.timestamp.clone(),
-                            });
-                            return JsonRpcResponse::success(req.id, info);
-                        }
+                    let path_len = repo.project.path.len();
+                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                        best_match = Some((path_len, std::sync::Arc::clone(repo)));
+                    }
+                }
+            }
+
+            if let Some((_, repo)) = best_match {
+                if let Ok(history) = repo.db.get_history(file_path) {
+                    if let Some(latest) = history.first() {
+                        let info = json!({
+                            "path": file_path,
+                            "snapshot_count": history.len(),
+                            "total_size_human": "Unknown",
+                            "earliest": history.last().map(|s| s.timestamp.clone()).unwrap_or_default(),
+                            "latest": latest.timestamp.clone(),
+                        });
+                        return JsonRpcResponse::success(req.id, info);
                     }
                 }
             }
@@ -927,19 +1020,26 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 }
             };
 
+            let mut best_match: Option<(usize, std::sync::Arc<mnem_core::Repository>)> = None;
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 if params.file_path.starts_with(&repo.project.path) {
-                    match repo.get_file_diff(
-                        &params.file_path,
-                        params.base_hash.as_deref(),
-                        &params.target_hash,
-                    ) {
-                        Ok(diff) => {
-                            return JsonRpcResponse::success(req.id, json!({ "diff": diff }));
-                        }
-                        Err(e) => return JsonRpcResponse::error(req.id, -32000, e.to_string()),
+                    let path_len = repo.project.path.len();
+                    if best_match.as_ref().map_or(true, |(len, _)| path_len > *len) {
+                        best_match = Some((path_len, std::sync::Arc::clone(repo)));
                     }
+                }
+            }
+            if let Some((_, repo)) = best_match {
+                match repo.get_file_diff(
+                    &params.file_path,
+                    params.base_hash.as_deref(),
+                    &params.target_hash,
+                ) {
+                    Ok(diff) => {
+                        return JsonRpcResponse::success(req.id, json!({ "diff": diff }));
+                    }
+                    Err(e) => return JsonRpcResponse::error(req.id, -32000, e.to_string()),
                 }
             }
             JsonRpcResponse::error(req.id, -32000, "File not found".into())

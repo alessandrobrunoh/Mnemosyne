@@ -23,6 +23,9 @@ struct Cli {
     #[arg(short, long, global = true)]
     project: Option<PathBuf>,
 
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: Option<bool>,
+
     #[arg(short, long, visible_alias = "j", global = true)]
     json: bool,
 }
@@ -54,10 +57,11 @@ fn main() -> Result<()> {
         Some(Commands::Track {
             list,
             remove,
+            purge,
             id,
             limit,
             page,
-        }) => commands::handle_track(list, remove, id, limit, page, json),
+        }) => commands::handle_track(list, remove, purge, id, limit, page, json),
         Some(Commands::H {
             file,
             limit,
@@ -65,7 +69,8 @@ fn main() -> Result<()> {
             timeline,
             since,
             branch,
-        }) => commands::handle_h(file, limit, page, timeline, since, branch, json),
+            clear,
+        }) => commands::handle_h(file, limit, page, timeline, since, branch, clear, json),
         Some(Commands::R {
             file,
             version,

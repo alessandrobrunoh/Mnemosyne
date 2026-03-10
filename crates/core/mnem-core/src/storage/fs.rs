@@ -234,31 +234,32 @@ impl CasStorage {
             ))
         })?;
 
-        // Decompress with size limit to prevent decompression bombs
-        const MAX_DECOMPRESSED_SIZE: usize = 256 * 1024 * 1024; // 256 MB
+        if raw.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        match zstd::stream::Decoder::new(std::io::Cursor::new(&raw)) {
-            Ok(mut decoder) => {
-                let mut decompressed = Vec::new();
-                let mut buf = [0u8; 64 * 1024];
-                loop {
-                    let n = decoder
-                        .read(&mut buf)
-                        .map_err(|_| AppError::Internal("Decompression failed".into()))?;
-                    if n == 0 {
-                        break;
-                    }
-                    if decompressed.len() + n > MAX_DECOMPRESSED_SIZE {
-                        return Err(AppError::Internal(format!(
-                            "Decompressed size exceeds {} MB limit",
-                            MAX_DECOMPRESSED_SIZE / (1024 * 1024)
-                        )));
-                    }
-                    decompressed.extend_from_slice(&buf[..n]);
+        // --- Robust Zstd Decompression (audit 3.3) ---
+        // Zstd magic number is 0xFD2FB528 (little endian)
+        let is_zstd = raw.len() >= 4 && 
+                     raw[0] == 0x28 && raw[1] == 0xB5 && raw[2] == 0x2F && raw[3] == 0xFD;
+
+        if !is_zstd {
+            return Ok(raw);
+        }
+
+        // Decompress with size limit
+        const MAX_DECOMPRESSED_SIZE: usize = 256 * 1024 * 1024; // 256 MB
+        match zstd::stream::decode_all(std::io::Cursor::new(&raw)) {
+            Ok(decompressed) => {
+                if decompressed.len() > MAX_DECOMPRESSED_SIZE {
+                    return Err(AppError::Internal(format!(
+                        "Decompressed size exceeds {} MB limit",
+                        MAX_DECOMPRESSED_SIZE / (1024 * 1024)
+                    )));
                 }
                 Ok(decompressed)
             }
-            Err(_) => Ok(raw), // Fallback: assume it was uncompressed (legacy file)
+            Err(_) => Ok(raw), // Fallback: return raw data if decompression fails
         }
     }
 

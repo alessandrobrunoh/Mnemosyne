@@ -16,6 +16,7 @@ pub struct Repository {
     pub fs: Arc<CasStorage>,
     pub config: Mutex<ConfigManager>,
     pub project: Project,
+    pub ignore: Option<ignore::gitignore::Gitignore>,
 }
 
 impl Repository {
@@ -23,7 +24,7 @@ impl Repository {
     pub fn is_compression_enabled(&self) -> bool {
         self.config
             .lock()
-            .map(|c| c.config.compression_enabled)
+            .map(|c| c.config.storage.compression_enabled)
             .unwrap_or(true)
     }
 }
@@ -34,8 +35,7 @@ impl Repository {
     /// Uses `~/.mnemosyne` as the global storage root.
     pub fn init() -> AppResult<Self> {
         let home = dirs::home_dir().ok_or_else(|| AppError::Config("Home dir not found".into()))?;
-        let cwd = std::env::current_dir().map_err(AppError::IoGeneric)?;
-        let root = Self::find_project_root(&cwd);
+        let root = Self::find_project_root(&std::env::current_dir().map_err(AppError::IoGeneric)?);
         Self::open(home.join(".mnemosyne"), root)
     }
 
@@ -122,6 +122,9 @@ impl Repository {
             let default_ignore = r#"# Mnemosyne Ignore File
 # Standard exclusions for development projects
 
+# Mnemosyne internal data
+.mnemosyne/
+
 # Build directories
 target/
 dist/
@@ -164,11 +167,18 @@ temp/
             let _ = std::fs::write(&ignore_path, default_ignore);
         }
 
+        let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(&project_path);
+        if ignore_path.exists() {
+            ignore_builder.add(&ignore_path);
+        }
+        let ignore = ignore_builder.build().ok();
+
         Ok(Self {
             db,
             fs,
             config: Mutex::new(config),
             project,
+            ignore,
         })
     }
 
@@ -247,6 +257,7 @@ temp/
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .config
+            .storage
             .retention_days;
         if retention == 0 {
             return Ok(0);
@@ -314,6 +325,15 @@ temp/
             path: file_path.to_path_buf(),
             source: e,
         })?;
+
+        let metadata = file.metadata().map_err(|e| AppError::Io {
+            path: file_path.to_path_buf(),
+            source: e,
+        })?;
+
+        if metadata.len() == 0 {
+            return self.save_snapshot(file_path, bytes::Bytes::new());
+        }
 
         // Memory Mapping for true Zero-Copy disk access
         let mmap = unsafe {
@@ -1198,5 +1218,19 @@ temp/
             }
         }
         Ok(locations)
+    }
+
+    pub fn is_ignored(&self, path: &Path) -> bool {
+        // SAFETY: Never, ever track Mnemosyne's own data directory.
+        // Doing so leads to recursion and CAS corruption (EOF errors).
+        let path_str = path.to_string_lossy();
+        if path_str.contains(".mnemosyne") || path_str.contains(".git") {
+            return true;
+        }
+
+        if let Some(ref gitignore) = self.ignore {
+            return gitignore.matched(path, path.is_dir()).is_ignore();
+        }
+        false
     }
 }

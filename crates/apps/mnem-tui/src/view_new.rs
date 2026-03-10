@@ -1,10 +1,10 @@
 use crate::app::AppState;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap},
-    Frame,
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -488,18 +488,21 @@ fn render_settings_view(f: &mut Frame, area: Rect, state: &AppState) {
     let theme = &state.theme;
 
     let items = vec![
-        ("Retention", format!("{} days", state.config.retention_days)),
+        (
+            "Retention",
+            format!("{} days", state.config.storage.retention_days),
+        ),
         (
             "Compression",
-            if state.config.compression_enabled {
+            if state.config.storage.compression_enabled {
                 "On"
             } else {
                 "Off"
             }
             .to_string(),
         ),
-        ("Theme", THEMES[state.config.theme_index].name.clone()),
-        ("IDE", state.config.ide.as_str().to_string()),
+        ("Theme", THEMES[state.config.ui.theme_index].name.clone()),
+        ("IDE", state.config.editor.ide.as_str().to_string()),
     ];
 
     let list_items: Vec<ListItem> = items

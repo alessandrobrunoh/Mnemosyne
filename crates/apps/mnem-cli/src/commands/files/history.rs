@@ -51,10 +51,53 @@ pub fn handle_h(
     timeline: bool,
     _since: Option<String>,
     branch: Option<String>,
+    clear: bool,
     json: bool,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let project_path = cwd.clone();
+
+    if clear {
+        // Clear history functionality
+        let mut success = false;
+        let mut message = String::new();
+
+        if mnem_core::client::daemon_running() {
+            if let Ok(mut client) = DaemonClient::connect() {
+                let params = mnem_core::protocol::ClearHistoryParams {
+                    project_path: project_path.to_string_lossy().to_string(),
+                };
+                match client.call(methods::PROJECT_CLEAR_HISTORY, serde_json::to_value(params)?) {
+                    Ok(res) => {
+                        let cleared = res.get("cleared_snapshots").and_then(|v| v.as_u64()).unwrap_or(0);
+                        success = true;
+                        message = format!("Successfully cleared history ({} snapshots deleted)", cleared);
+                    }
+                    Err(e) => {
+                        message = format!("Failed to clear history: {}", e);
+                    }
+                }
+            }
+        } else {
+            // Daemon not running, clear manually if possible or report error
+            message = "Daemon must be running to clear history".to_string();
+        }
+
+        if json {
+            println!("{}", serde_json::json!({ "success": success, "message": message }));
+        } else {
+            let layout = Layout::new();
+            if success {
+                layout.empty();
+                layout.badge_success("CLEARED", &message);
+            } else {
+                layout.empty();
+                layout.badge_error("ERROR", &message);
+            }
+        }
+        return Ok(());
+    }
+
     let tracked_file = project_path.join(".mnemosyne").join("tracked");
 
     if !tracked_file.exists() {
