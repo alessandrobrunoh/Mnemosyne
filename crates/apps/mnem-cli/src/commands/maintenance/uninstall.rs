@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::Layout;
-use crate::ui::Presentable;
+use crate::ui::Renderable;
 use crate::ui::presentable::SimpleResponse;
 
 /// Uninstall Mnemosyne from the system
@@ -47,7 +47,7 @@ impl CommandStrategy for UninstallCommand {
         let result = run_uninstall_script(self.purge)?;
 
         if global_opts.json {
-            println!("{}", serde_json::to_string_pretty(&result.render_json()?)?);
+            println!("{}", serde_json::to_string_pretty(&result.json()?)?);
         } else {
             if result.success {
                 layout.success_bright(&format!("✓ {}", result.message));

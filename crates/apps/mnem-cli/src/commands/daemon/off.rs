@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::Presentable;
+use crate::ui::Renderable;
 use crate::ui::presentable::SimpleResponse;
 
 /// Stop the Mnemosyne daemon
@@ -32,12 +32,9 @@ impl CommandStrategy for OffCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", response.json()?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())

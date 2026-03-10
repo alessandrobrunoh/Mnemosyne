@@ -1,9 +1,9 @@
 use anyhow::Result;
+use crossterm::style::Stylize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use crossterm::style::Stylize;
 
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 use mnem_core::protocol::SnapshotInfo;
 
 pub struct ActivityGraph {
@@ -16,7 +16,12 @@ pub struct ActivityGraph {
 }
 
 impl ActivityGraph {
-    pub fn new(title: &str, snapshots: Vec<SnapshotInfo>, project_path: PathBuf, target_file: Option<String>) -> Self {
+    pub fn new(
+        title: &str,
+        snapshots: Vec<SnapshotInfo>,
+        project_path: PathBuf,
+        target_file: Option<String>,
+    ) -> Self {
         Self {
             title: title.to_string(),
             snapshots,
@@ -36,8 +41,8 @@ impl ActivityGraph {
     }
 }
 
-impl Presentable for ActivityGraph {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for ActivityGraph {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         let theme = layout.theme();
 
@@ -48,14 +53,19 @@ impl Presentable for ActivityGraph {
 
         let total_count = self.snapshots.len();
         let offset = (self.page - 1) * self.limit;
-        
-        let paged_items: Vec<&SnapshotInfo> = self.snapshots.iter()
+
+        let paged_items: Vec<&SnapshotInfo> = self
+            .snapshots
+            .iter()
             .skip(offset)
             .take(self.limit)
             .collect();
 
         if paged_items.is_empty() && self.page > 1 {
-            layout.warning(&format!("Page {} is empty. Total items: {}", self.page, total_count));
+            layout.warning(&format!(
+                "Page {} is empty. Total items: {}",
+                self.page, total_count
+            ));
             return Ok(());
         }
 
@@ -89,12 +99,16 @@ impl Presentable for ActivityGraph {
                 if current_block_id.is_some() {
                     layout.graph_connector();
                 }
-                
+
                 if let Some(ref ch) = snap.commit_hash {
                     let msg = snap.commit_message.as_deref().unwrap_or("Git Commit");
                     layout.graph_block_header("G", msg, theme.timeline_purple);
                 } else if let Some(ref cp) = snap.checkpoint_name {
-                    layout.graph_block_header("◈", &format!("Checkpoint: {}", cp), theme.timeline_cyan);
+                    layout.graph_block_header(
+                        "◈",
+                        &format!("Checkpoint: {}", cp),
+                        theme.timeline_cyan,
+                    );
                 } else if idx > 0 {
                     layout.graph_block_header("·", "Manual saves", theme.text_dim);
                 }
@@ -103,16 +117,32 @@ impl Presentable for ActivityGraph {
 
             // 3. Determine Node Info
             let (icon, color, meta) = if snap.commit_hash.is_some() {
-                ("G", theme.timeline_purple, snap.commit_message.clone().unwrap_or_else(|| "Commit".into()))
+                (
+                    "G",
+                    theme.timeline_purple,
+                    snap.commit_message
+                        .clone()
+                        .unwrap_or_else(|| "Commit".into()),
+                )
             } else if snap.checkpoint_name.is_some() {
-                ("◈", theme.timeline_cyan, snap.checkpoint_name.clone().unwrap_or_default())
+                (
+                    "◈",
+                    theme.timeline_cyan,
+                    snap.checkpoint_name.clone().unwrap_or_default(),
+                )
             } else {
-                ("·", theme.text_dim, if self.target_file.is_some() { "Manual save".into() } else {
-                    let p = Path::new(&snap.file_path);
-                    p.strip_prefix(&self.project_path)
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| snap.file_path.clone())
-                })
+                (
+                    "·",
+                    theme.text_dim,
+                    if self.target_file.is_some() {
+                        "Manual save".into()
+                    } else {
+                        let p = Path::new(&snap.file_path);
+                        p.strip_prefix(&self.project_path)
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| snap.file_path.clone())
+                    },
+                )
             };
 
             let display_meta = if self.target_file.is_some() {
@@ -136,7 +166,11 @@ impl Presentable for ActivityGraph {
             }
         } else {
             layout.graph_empty_line();
-            layout.graph_block_header("ℹ", &format!("... page {} available", self.page + 1), theme.timeline_yellow);
+            layout.graph_block_header(
+                "ℹ",
+                &format!("... page {} available", self.page + 1),
+                theme.timeline_yellow,
+            );
         }
 
         // 5. Discrete Footer
@@ -150,7 +184,10 @@ impl Presentable for ActivityGraph {
             "TOTAL".with(theme.text_dim).bold(),
             total_count.to_string().with(theme.text_bright),
             "FILE".with(theme.text_dim).bold(),
-            self.target_file.as_deref().unwrap_or("Project").with(theme.text_bright)
+            self.target_file
+                .as_deref()
+                .unwrap_or("Project")
+                .with(theme.text_bright)
         );
 
         layout.legend(&[
@@ -161,9 +198,5 @@ impl Presentable for ActivityGraph {
         ]);
 
         Ok(())
-    }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(&self.snapshots)?)
     }
 }

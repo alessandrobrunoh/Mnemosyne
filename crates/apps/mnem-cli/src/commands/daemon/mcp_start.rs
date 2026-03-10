@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::presentable::SimpleResponse;
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 
 /// Start the MCP server
 #[derive(Args, Clone, Debug)]
@@ -53,12 +53,9 @@ impl CommandStrategy for McpStartCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", response.json()?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())

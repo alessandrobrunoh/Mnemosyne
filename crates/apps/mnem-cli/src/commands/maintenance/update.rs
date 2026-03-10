@@ -1,11 +1,10 @@
 use anyhow::Result;
 use clap::Args;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::Layout;
-use crate::ui::Presentable;
+use crate::ui::presentable::Renderable;
 
 const GITHUB_REPO: &str = "alessandrobrunoh/Mnemosyne";
 
@@ -31,8 +30,8 @@ pub struct UpdateResponse {
     pub check_only: bool,
 }
 
-impl Presentable for UpdateResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for UpdateResponse {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         layout.header_dashboard("UPDATE STATUS");
         layout.row_labeled("◆", "Current Version", &self.current_version);
@@ -53,10 +52,6 @@ impl Presentable for UpdateResponse {
             layout.success_bright("✓ You are on the latest version!");
         }
         Ok(())
-    }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
     }
 }
 
@@ -132,12 +127,9 @@ impl CommandStrategy for UpdateCommand {
 
         if !update_available || self.check_only {
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&update_res.render_json()?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&update_res.json()?)?);
             } else {
-                update_res.render_tui()?;
+                update_res.text()?;
             }
             return Ok(());
         }
@@ -156,12 +148,9 @@ impl CommandStrategy for UpdateCommand {
         }
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&update_res.render_json()?)?
-            );
+            println!("{}", serde_json::to_string_pretty(&update_res.json()?)?);
         } else {
-            update_res.render_tui()?;
+            update_res.text()?;
         }
 
         Ok(())

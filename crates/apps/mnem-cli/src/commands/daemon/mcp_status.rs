@@ -3,7 +3,7 @@ use clap::Args;
 use serde_json::json;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
+use crate::ui::Layout;
 
 /// Show MCP server status
 #[derive(Args, Clone, Debug)]

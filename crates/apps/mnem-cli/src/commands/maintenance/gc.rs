@@ -3,7 +3,7 @@ use clap::Args;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::Layout;
-use crate::ui::Presentable;
+use crate::ui::Renderable;
 use crate::ui::presentable::SimpleResponse;
 
 /// Garbage collection for orphan chunks
@@ -73,10 +73,7 @@ impl CommandStrategy for GcCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", serde_json::to_string_pretty(&response.json()?)?);
         } else {
             layout.section_start("gc", "Garbage Collection");
             if response.success {

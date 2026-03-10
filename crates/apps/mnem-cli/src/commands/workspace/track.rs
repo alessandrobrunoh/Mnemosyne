@@ -1,11 +1,10 @@
+use crate::commands::common::{CommandStrategy, GlobalOptions};
+use crate::ui::Layout;
+use crate::ui::presentable::Renderable;
 use anyhow::Result;
 use clap::Args;
 use crossterm::style::Stylize;
 use serde::Serialize;
-use serde_json::Value;
-
-use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
 
 #[derive(Serialize)]
 pub struct TrackResponse {
@@ -28,8 +27,8 @@ pub struct ProjectInfo {
     pub id: String,
 }
 
-impl Presentable for TrackResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for TrackResponse {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         let theme = layout.theme();
         use crossterm::style::Stylize;
@@ -113,10 +112,6 @@ impl Presentable for TrackResponse {
 
         Ok(())
     }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
-    }
 }
 
 /// Track and manage projects
@@ -185,12 +180,9 @@ impl CommandStrategy for TrackCommand {
             };
 
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&response.json()?)?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
             return Ok(());
         }
@@ -273,12 +265,9 @@ impl CommandStrategy for TrackCommand {
             };
 
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&response.json()?)?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
             return Ok(());
         }
@@ -327,12 +316,9 @@ impl CommandStrategy for TrackCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", serde_json::to_string_pretty(&response.json()?)?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())

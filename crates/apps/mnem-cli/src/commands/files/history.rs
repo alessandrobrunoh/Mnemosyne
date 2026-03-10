@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 use mnem_core::client::DaemonClient;
 use mnem_core::env::get_base_dir;
 use mnem_core::protocol::SnapshotInfo;
@@ -22,8 +22,8 @@ pub struct HistoryResponse {
     pub page: usize,
 }
 
-impl Presentable for HistoryResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for HistoryResponse {
+    fn text(&self) -> Result<()> {
         use crate::ui::components::activity_graph::ActivityGraph;
         let cwd = std::env::current_dir()?;
 
@@ -44,7 +44,7 @@ impl Presentable for HistoryResponse {
         // Show activity graph
         let graph =
             ActivityGraph::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
-        let _ = graph.render_tui();
+        let _ = graph.text();
 
         layout.empty();
 
@@ -106,10 +106,6 @@ impl Presentable for HistoryResponse {
         }
 
         Ok(())
-    }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
     }
 }
 
@@ -220,12 +216,9 @@ impl CommandStrategy for HistoryCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", serde_json::to_string_pretty(&response.json()?)?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())

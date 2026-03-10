@@ -1,10 +1,8 @@
+use crate::commands::common::{CommandStrategy, GlobalOptions};
+use crate::ui::{Layout, presentable::Renderable};
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
-
-use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
 
 #[derive(Serialize)]
 pub struct GitCommitInfo {
@@ -21,8 +19,8 @@ pub struct GitResponse {
     pub commits: Vec<GitCommitInfo>,
 }
 
-impl Presentable for GitResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for GitResponse {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         layout.header_dashboard("GIT COMMITS");
         layout.section_branch("gt", "Recent Commits");
@@ -43,10 +41,6 @@ impl Presentable for GitResponse {
         }
         layout.section_end();
         Ok(())
-    }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
     }
 }
 
@@ -94,10 +88,7 @@ impl CommandStrategy for GitCommand {
             };
 
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&response.json()?)?);
             } else if self.log {
                 println!("Git Log:");
                 println!("─");
@@ -110,7 +101,7 @@ impl CommandStrategy for GitCommand {
                     );
                 }
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
             return Ok(());
         }

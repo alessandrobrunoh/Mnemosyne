@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::path::Component;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 use mnem_core::client::DaemonClient;
 use mnem_core::protocol::SnapshotInfo;
 use mnem_core::protocol::methods;
@@ -26,8 +26,8 @@ pub struct RestoreResponse {
     pub page: usize,
 }
 
-impl Presentable for RestoreResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for RestoreResponse {
+    fn text(&self) -> Result<()> {
         use crate::ui::components::activity_graph::ActivityGraph;
 
         if let Some(history) = &self.history {
@@ -41,7 +41,7 @@ impl Presentable for RestoreResponse {
                 );
                 graph.limit = self.limit;
                 graph.page = self.page;
-                graph.render_tui()?;
+                graph.text()?;
                 println!();
                 Layout::new()
                     .info("Use 'mnem r <file> [version_number]' to restore a specific version.");
@@ -64,10 +64,6 @@ impl Presentable for RestoreResponse {
         }
 
         Ok(())
-    }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
     }
 }
 
@@ -187,12 +183,9 @@ impl CommandStrategy for RestoreCommand {
             };
 
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&response.json()?)?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
             return Ok(());
         }
@@ -242,12 +235,9 @@ impl CommandStrategy for RestoreCommand {
             };
 
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&response.json()?)?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
             return Ok(());
         }
@@ -364,12 +354,9 @@ impl CommandStrategy for RestoreCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", serde_json::to_string_pretty(&response.json()?)?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())
@@ -449,16 +436,19 @@ fn get_history_for_restore(
 
     if let Some(repo) = repo {
         let history = repo.get_history(&full_path)?;
-        let infos = history.into_iter().map(|s| mnem_core::protocol::SnapshotInfo {
-            id: s.id,
-            file_path: s.file_path,
-            timestamp: s.timestamp,
-            content_hash: s.content_hash,
-            git_branch: s.git_branch,
-            commit_hash: s.commit_hash,
-            commit_message: s.commit_message,
-            checkpoint_name: s.checkpoint_name,
-        }).collect();
+        let infos = history
+            .into_iter()
+            .map(|s| mnem_core::protocol::SnapshotInfo {
+                id: s.id,
+                file_path: s.file_path,
+                timestamp: s.timestamp,
+                content_hash: s.content_hash,
+                git_branch: s.git_branch,
+                commit_hash: s.commit_hash,
+                commit_message: s.commit_message,
+                checkpoint_name: s.checkpoint_name,
+            })
+            .collect();
         return Ok(infos);
     }
 

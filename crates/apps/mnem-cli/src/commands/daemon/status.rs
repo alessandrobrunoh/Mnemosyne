@@ -1,10 +1,9 @@
 use anyhow::Result;
 use clap::Args;
 use mnem_core::protocol::StatusResponse;
-use serde_json::Value;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 
 fn format_duration(secs: u64) -> String {
     if secs < 60 {
@@ -18,8 +17,8 @@ fn format_duration(secs: u64) -> String {
     }
 }
 
-impl Presentable for StatusResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for StatusResponse {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         let theme = layout.theme();
 
@@ -83,10 +82,6 @@ impl Presentable for StatusResponse {
         layout.graph_branch_end();
         Ok(())
     }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
-    }
 }
 
 /// Show daemon status and performance metrics
@@ -104,9 +99,9 @@ impl CommandStrategy for StatusCommand {
                 let status: StatusResponse = serde_json::from_value(res)?;
 
                 if global_opts.json {
-                    println!("{}", serde_json::to_string_pretty(&status.render_json()?)?);
+                    println!("{}", status.json()?);
                 } else {
-                    status.render_tui()?;
+                    status.text()?;
                 }
             }
             Err(_) => {

@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 use mnem_core::client::DaemonClient;
 use mnem_core::protocol::methods;
 
@@ -23,8 +23,8 @@ pub struct ProjectInfoResponse {
     pub source: String,
 }
 
-impl Presentable for ProjectInfoResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for ProjectInfoResponse {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         let theme = layout.theme();
 
@@ -99,10 +99,6 @@ impl Presentable for ProjectInfoResponse {
         layout.graph_branch_end();
         Ok(())
     }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
-    }
 }
 
 /// Show project information and statistics
@@ -154,12 +150,9 @@ impl CommandStrategy for InfoCommand {
                     };
 
                     if global_opts.json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&response.render_json()?)?
-                        );
+                        println!("{}", serde_json::to_string_pretty(&response.json()?)?);
                     } else {
-                        response.render_tui()?;
+                        response.text()?;
                     }
                     return Ok(());
                 }
@@ -260,12 +253,9 @@ impl CommandStrategy for InfoCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", serde_json::to_string_pretty(&response.json()?)?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())

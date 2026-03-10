@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
+use crate::ui::{Layout, Renderable};
 use mnem_core::models::SearchResult;
 use mnem_core::protocol::SymbolLocation;
 
@@ -25,8 +25,8 @@ pub enum SearchResults {
     Content(Vec<SearchResult>),
 }
 
-impl Presentable for SearchResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for SearchResponse {
+    fn text(&self) -> Result<()> {
         use crossterm::style::Stylize;
         let layout = Layout::new();
 
@@ -182,10 +182,6 @@ impl Presentable for SearchResponse {
         }
         Ok(())
     }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
-    }
 }
 
 /// Search through code history
@@ -312,12 +308,9 @@ impl CommandStrategy for SearchCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", response.json()?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())

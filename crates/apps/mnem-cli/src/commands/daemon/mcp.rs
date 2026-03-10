@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::ui::Layout;
-use crate::ui::Presentable;
+use crate::ui::Renderable;
 use crate::ui::presentable::SimpleResponse;
 
 pub fn handle_mcp(subcommand: &str, json: bool) -> Result<()> {
@@ -50,12 +50,9 @@ pub fn handle_mcp(subcommand: &str, json: bool) -> Result<()> {
             };
 
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", response.json()?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
         }
 
@@ -96,12 +93,9 @@ pub fn handle_mcp(subcommand: &str, json: bool) -> Result<()> {
             };
 
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", response.json()?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
         }
 

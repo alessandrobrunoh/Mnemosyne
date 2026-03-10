@@ -1,10 +1,9 @@
+use crate::commands::common::{CommandStrategy, GlobalOptions};
+use crate::ui::Layout;
+use crate::ui::presentable::Renderable;
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
-
-use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, Presentable};
 
 #[derive(Serialize)]
 pub struct ConfigResponse {
@@ -39,8 +38,8 @@ pub struct EditorConfig {
     pub ide: String,
 }
 
-impl Presentable for ConfigResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for ConfigResponse {
+    fn text(&self) -> Result<()> {
         let layout = Layout::new();
         let theme = layout.theme();
 
@@ -155,10 +154,6 @@ impl Presentable for ConfigResponse {
 
         Ok(())
     }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
-    }
 }
 
 /// Manage Mnemosyne configuration
@@ -200,12 +195,9 @@ impl CommandStrategy for ConfigCommand {
             };
 
             if global_opts.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.render_json()?)?
-                );
+                println!("{}", response.json()?);
             } else {
-                response.render_tui()?;
+                response.text()?;
             }
             return Ok(());
         }
@@ -274,12 +266,9 @@ impl CommandStrategy for ConfigCommand {
                     };
 
                     if global_opts.json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&response.render_json()?)?
-                        );
+                        println!("{}", response.json()?);
                     } else {
-                        response.render_tui()?;
+                        response.text()?;
                     }
                 }
                 Err(e) => {
@@ -330,12 +319,9 @@ impl CommandStrategy for ConfigCommand {
         };
 
         if global_opts.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response.render_json()?)?
-            );
+            println!("{}", response.json()?);
         } else {
-            response.render_tui()?;
+            response.text()?;
         }
 
         Ok(())
