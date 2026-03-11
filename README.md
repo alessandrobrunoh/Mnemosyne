@@ -1,196 +1,107 @@
-<div align="center">
+# Mnemosyne (MNP)
 
-# Mnemosyne
-**Never lose code again.** Sync your history across your favorite IDEs. Local snapshots, semantic understanding, and instant restore—all offline.
+**Semantic Code Archaeology & High-Performance Memory for Your Codebase.**
 
-[![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-APACHE-blue.svg)](LICENSE)
+Mnemosyne is a high-performance, local-first platform designed to provide an eternal memory for your development workflow. By leveraging Tree-sitter for semantic understanding and a content-addressable storage (CAS) architecture, Mnemosyne tracks the evolution of your code not just as text diffs, but as logical mutations of symbols, functions, and structures.
 
-</div>
-
----
-
-## Why Mnemosyne?
-
-...
+[![CI](https://github.com/alessandrobrunoh/Mnemosyne/actions/workflows/ci.yml/badge.svg)](https://github.com/alessandrobrunoh/Mnemosyne/actions/workflows/ci.yml)
+[![Build](https://github.com/alessandrobrunoh/Mnemosyne/actions/workflows/build.yml/badge.svg)](https://github.com/alessandrobrunoh/Mnemosyne/actions/workflows/build.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 ---
 
-## Installation
+## Core Pillars
 
-### Windows (PowerShell)
-```powershell
-irm https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1 | iex
-```
+### 1. Semantic Identity over Textual Diffs
+Traditional version control tracks lines. Mnemosyne tracks **logic**. Using Tree-sitter ASTs and `structural_hash` algorithms, it maintains continuity across renames, refactors, and movements. It understands when a function has moved or when a struct has evolved, providing a true "archaeological" record of your symbols.
 
-### macOS / Linux
+### 2. High-Performance Engineering
+Built in Rust with a focus on zero-copy operations and granular concurrency:
+*   **Zero-Copy Data Handling**: Utilizes `bytes::Bytes` and `mmap` to minimize CPU overhead.
+*   **Lock-Free Concurrency**: Uses concurrent collections (`DashMap`) and atomics to ensure the daemon never blocks your flow.
+*   **Storage Architecture**: Powered by `redb` as a high-performance B-tree index and a custom CAS layer for efficient deduplication.
+
+### 3. Model Context Protocol (MCP) Integration
+Mnemosyne isn't just for humans. It acts as a powerful context layer for LLMs and AI Agents via the **Mnemosyne Protocol (MNP)**. It allows agents to:
+*   Retrieve semantic deltas instead of raw files (saving tokens).
+*   Access the historical evolution of specific symbols.
+*   Understand the "why" behind architectural changes through indexed metadata.
+
+---
+
+## Workspace Architecture
+
+The project is structured as a modular workspace for maximum reusability:
+
+| Component | Description |
+|-----------|-------------|
+| `mnem-daemon` | The background engine managing file watching, AST parsing, and storage. |
+| `mnem-cli` | A polished CLI for project management and quick history access. |
+| `mnem-tui` | A feature-rich terminal interface for visual history exploration. |
+| `mnem-core` | Shared logic: IPC, MNP protocol, CAS storage, and database schemas. |
+| `mnem-mcp` | Model Context Protocol server for integrating with LLMs (Claude, etc.). |
+| `mnem-lsp` | Language Server Protocol bridge for IDE-native features. |
+| `mnem-zed` | Native extension for the Zed editor. |
+
+---
+
+## Getting Started
+
+### Installation
+
+#### One-line Install (Recommended)
+**macOS / Linux:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.sh | bash
 ```
 
----
-
-## Quick Start
-
-```bash
-# 1. Start the daemon
-mnem on
-
-# 2. Track your project
-cd /path/to/project
-mnem track
-
-# 3. View history
-mnem h
-
-# 4. Restore files
-mnem r <path/to/file> --list       # See all versions
-mnem r <path/to/file> 1            # Restore verison 1
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/alessandrobrunoh/Mnemosyne/main/scripts/install.ps1 | iex
 ```
 
----
-
-### From Source
+#### From Source
 ```bash
 git clone https://github.com/alessandrobrunoh/Mnemosyne.git
-cd Mnemosyne/mnemosyne
-cargo build --release -p mnem-cli -p mnem-daemon
-# Copy binaries to your PATH
+cd Mnemosyne
+cargo build --release
 ```
 
----
+### Quick Start
+```bash
+# Start the background daemon
+mnem daemon start
 
-## Features
+# Initialize tracking in your current project
+mnem track
 
-- **Auto Snapshots** — Every file save captured automatically
-- **Branch Tracking** — History organized by Git branch
-- **Semantic Deltas** — Understands code structure (functions, classes)
-- **Instant Restore** — Millisecond recovery to any point
-- **Full-Text Search** — Search across all history
-- **10-100x Storage** — Deduplication vs full copies
-- **Symbol History** — Track how functions and classes evolve
-- **IDE Integration** — Open versions in your editor
+# Open the interactive TUI to explore history
+mnem ui
 
----
-
-## Commands
-
-### Daemon
-| Command | Description |
-|--------|-------------|
-| `mnem on` | Start daemon |
-| `mnem off` | Stop daemon |
-| `mnem status` | Show status & stats |
-
-### Tracking
-| Command | Description |
-|--------|-------------|
-| `mnem track` | Track current directory |
-| `mnem track --list` | List tracked projects |
-
-### History
-| Command | Description |
-|--------|-------------|
-| `mnem h` | View history |
-| `mnem h --branch main` | Filter by branch |
-| `mnem h --limit 20` | Limit results |
-| `mnem h --timeline` | Timeline view |
-
-### Search & Restore
-| Command | Description |
-|--------|-------------|
-| `mnem s <query>` | Search in history |
-| `mnem r` | Interactive restore |
-| `mnem r --version 5` | Restore to version 5 |
-| `mnem r --undo` | Undo last restore |
-
-### Info & Maintenance
-| Command | Description |
-|--------|-------------|
-| `mnem info` | Project statistics |
-| `mnem gc` | Garbage collection |
-| `mnem config` | Manage configuration |
-
----
-
-## How It Works
-
-### Per-Project Storage
-
-Each project stores its data locally in `.mnemosyne/`:
-
+# Search for a specific symbol's history
+mnem search --symbol "process_data"
 ```
-my-project/
-├── .mnemosyne/          # All data lives here!
-│   ├── tracked          # Project ID
-│   ├── db/             # redb (snapshots, symbols, interning)
-│   └── cas/            # Content-addressable storage (unique chunks)
-├── src/
-│   └── main.rs
-└── Cargo.toml
-```
-
-**Benefits:**
-- Portable — copy project to move history
-- Delete `.mnemosyne/` to remove all history  
-- Works offline — no cloud required
-- No global state pollution
-
-
-### Semantic Understanding
-
-Mnemosyne uses **Tree-sitter** to understand code structure:
-
-- Tracks **functions, classes, structs** — not just lines
-- Survives **renames and refactors**
-- **Deduplicates** using BLAKE3 hashing
-- **Compresses** with Zstd (Level 3 optimized for speed)
 
 ---
 
 ## Configuration
 
-### Project Ignore
+Mnemosyne respects your project boundaries through `.mnemignore` files and a global `config.toml`.
 
-Create `.mnemignore` in your project root:
-
-```
-target/
-node_modules/
-*.log
-*.tmp
-build/
-dist/
-```
-
-### Global Config
-
-`~/.mnemosyne/config.toml`:
-
+**Global Config (`~/.mnemosyne/config.toml`):**
 ```toml
-[daemon]
-auto_start = true
-poll_interval_ms = 500
-
 [storage]
-compression = true
-deduplicate = true
+retention_days = 30
+compression_enabled = true
+max_file_size_mb = 10
 
-[ignore]
-global = ["*.log", "*.tmp"]
+[editor]
+ide = "Zed"
 ```
-
----
-
-## Integrations
-
-- **CLI** — Full-featured command line
-- **VSCode** — Coming soon
-- **Zed** — Coming soon
-- **JetBrains** - Coming soon
 
 ---
 
 ## License
 
-MIT — See [LICENSE](LICENSE)
+This project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for details.
