@@ -14,7 +14,7 @@ use daemon::{
     McpStartCommand, McpStatusCommand, McpStopCommand, OffCommand, OnCommand, StatusCommand,
 };
 use files::{HistoryCommand, InfoCommand, RestoreCommand, SearchCommand};
-use general::GitCommand;
+use general::{ComponentsCommand, GitCommand};
 use maintenance::{ConfigCommand, GcCommand, UninstallCommand, UpdateCommand};
 use workspace::TrackCommand;
 
@@ -24,10 +24,11 @@ use workspace::TrackCommand;
 /// - The Commands enum with struct variants
 /// - The execute() method that dispatches to the appropriate command
 macro_rules! declare_commands {
-    ($($variant_name:ident => $struct_name:ident),* $(,)?) => {
+    ($( $(#[$attr:meta])* $variant_name:ident => $struct_name:ident),* $(,)?) => {
         #[derive(Subcommand)]
         pub enum Commands {
             $(
+                $(#[$attr])*
                 $variant_name($struct_name),
             )*
         }
@@ -65,6 +66,7 @@ declare_commands! {
     Gc => GcCommand,
     Config => ConfigCommand,
     Git => GitCommand,
+    Components => ComponentsCommand,
     Uninstall => UninstallCommand,
     Update => UpdateCommand,
 

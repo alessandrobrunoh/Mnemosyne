@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Renderable};
@@ -211,7 +210,7 @@ impl CommandStrategy for SearchCommand {
     fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
         use mnem_core::{client::DaemonClient, protocol::methods};
 
-        if self.query.is_none() || self.query.as_ref().unwrap().is_empty() {
+        let Some(query) = self.query.as_ref().filter(|q| !q.is_empty()) else {
             if global_opts.json {
                 println!(
                     "{}",
@@ -239,9 +238,8 @@ impl CommandStrategy for SearchCommand {
                 layout.item_simple("  mnem s \"UserRepository\" --semantic");
             }
             return Ok(());
-        }
+        };
 
-        let query = self.query.clone().unwrap();
         let offset = (self.page.saturating_sub(1)) * self.limit;
 
         let mut client = match DaemonClient::connect() {
@@ -300,7 +298,7 @@ impl CommandStrategy for SearchCommand {
 
         let response = SearchResponse {
             success: true,
-            query,
+            query: query.to_string(),
             semantic: self.semantic,
             results,
             limit: self.limit,
