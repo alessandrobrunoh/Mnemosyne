@@ -284,7 +284,9 @@ temp/
         let _ = self.fs.clean_temp();
 
         // 6. VACUUM to reclaim space
-        if pruned > 0 && let Err(e) = self.db.vacuum() {
+        if pruned > 0
+            && let Err(e) = self.db.vacuum()
+        {
             eprintln!("Warning: VACUUM failed: {}", e);
         }
 
@@ -626,7 +628,9 @@ temp/
         };
 
         // Create a safety snapshot of the current file BEFORE overwriting
-        if target_canonical.exists() && let Err(e) = self.save_snapshot_from_file(&target_canonical) {
+        if target_canonical.exists()
+            && let Err(e) = self.save_snapshot_from_file(&target_canonical)
+        {
             eprintln!("Warning: failed to create pre-restore snapshot: {}", e);
         }
 

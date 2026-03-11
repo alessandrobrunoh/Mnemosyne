@@ -1,8 +1,9 @@
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default, Eq)]
 pub enum Ide {
     #[default]
     Zed,
@@ -18,14 +19,24 @@ impl Ide {
             Self::VsCode => "VsCode",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for Ide {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "zed" => Some(Self::Zed),
-            "zed-preview" | "zedpreview" => Some(Self::ZedPreview),
-            "vscode" | "vs-code" => Some(Self::VsCode),
-            _ => None,
+            "zed" => Ok(Self::Zed),
+            "zed-preview" | "zedpreview" => Ok(Self::ZedPreview),
+            "vscode" | "vs-code" => Ok(Self::VsCode),
+            _ => Err(()),
         }
+    }
+}
+
+impl Ide {
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        Ide::from_str(s).ok()
     }
 }
 
@@ -130,10 +141,10 @@ impl From<LegacyConfig> for Config {
         if let Some(val) = legacy.theme_index {
             config.ui.theme_index = val;
         }
-        if let Some(ref val) = legacy.ide {
-            if let Some(ide) = Ide::from_str(val) {
-                config.editor.ide = ide;
-            }
+        if let Some(ref val) = legacy.ide
+            && let Some(ide) = Ide::from_str_opt(val)
+        {
+            config.editor.ide = ide;
         }
 
         config
@@ -297,8 +308,8 @@ Gemfile.lock
                     .map_err(|e| AppError::Config(e.to_string()))?;
             }
             "editor.ide" => {
-                self.config.editor.ide =
-                    Ide::from_str(value).ok_or_else(|| AppError::Config("Invalid IDE".into()))?;
+                self.config.editor.ide = Ide::from_str_opt(value)
+                    .ok_or_else(|| AppError::Config("Invalid IDE".into()))?;
             }
             _ => return Err(AppError::Config(format!("Unknown config key: {}", key))),
         }

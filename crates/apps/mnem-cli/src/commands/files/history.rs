@@ -174,7 +174,9 @@ impl HistoryCommand {
         let mut success = false;
         let mut message = String::new();
 
-        if mnem_core::client::daemon_running() && let Ok(mut client) = DaemonClient::connect() {
+        if mnem_core::client::daemon_running()
+            && let Ok(mut client) = DaemonClient::connect()
+        {
             let params = mnem_core::protocol::ClearHistoryParams {
                 project_path: project_path.to_string_lossy().to_string(),
             };

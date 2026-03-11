@@ -231,7 +231,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             for project in &projects {
                 let project_path = std::path::PathBuf::from(&project.path);
                 current_paths.insert(project.path.clone());
-                
+
                 if !project_path.exists() {
                     continue;
                 }
@@ -284,7 +284,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     paths_to_remove.push(item.key().clone());
                 }
             }
-            
+
             for p in paths_to_remove {
                 state.monitors.remove(&p);
                 state.repos.remove(&p);
@@ -292,20 +292,24 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 info!("Unloaded project: {}", p);
             }
 
-            JsonRpcResponse::success(req.id, json!({"loaded": loaded, "total": total, "unloaded": unloaded}))
+            JsonRpcResponse::success(
+                req.id,
+                json!({"loaded": loaded, "total": total, "unloaded": unloaded}),
+            )
         }
 
         protocol::methods::PROJECT_CLEAR_HISTORY => {
-            let params: protocol::ClearHistoryParams = match serde_json::from_value(req.params.clone()) {
-                Ok(p) => p,
-                Err(e) => {
-                    return JsonRpcResponse::error(
-                        req.id,
-                        -32602,
-                        format!("Invalid params: {}", e),
-                    );
-                }
-            };
+            let params: protocol::ClearHistoryParams =
+                match serde_json::from_value(req.params.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32602,
+                            format!("Invalid params: {}", e),
+                        );
+                    }
+                };
 
             let project_path = params.project_path;
 
@@ -330,7 +334,13 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 // If not in state, let's just try to open it and clear
                 let base_dir = match get_base_dir() {
                     Ok(d) => d,
-                    Err(e) => return JsonRpcResponse::error(req.id, -32603, format!("Base dir error: {}", e)),
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            -32603,
+                            format!("Base dir error: {}", e),
+                        );
+                    }
                 };
                 let pb = std::path::PathBuf::from(&project_path);
                 if let Ok(repo) = Repository::open(base_dir, pb) {
@@ -340,7 +350,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             state.history_cache.write().clear();
 
-            JsonRpcResponse::success(req.id, json!({"cleared_snapshots": cleared_count, "project": project_path}))
+            JsonRpcResponse::success(
+                req.id,
+                json!({"cleared_snapshots": cleared_count, "project": project_path}),
+            )
         }
 
         protocol::methods::WATCH | protocol::methods::PROJECT_WATCH => {
@@ -511,7 +524,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
             for repo_entry in state.repos.iter() {
                 let repo = repo_entry.value();
                 let project_path = std::path::Path::new(&repo.project.path);
-                
+
                 if file_path.starts_with(project_path) {
                     let path_len = project_path.as_os_str().len();
                     if best_match.as_ref().is_none_or(|(len, _)| path_len > *len) {
@@ -522,7 +535,10 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
 
             if let Some((_, repo)) = best_match {
                 let project_path = std::path::Path::new(&repo.project.path);
-                info!("SNAPSHOT_LIST: Found best matching project: {:?}", project_path);
+                info!(
+                    "SNAPSHOT_LIST: Found best matching project: {:?}",
+                    project_path
+                );
                 info!("SNAPSHOT_LIST: Cache hit for {:?}", params.file_path);
                 if let Some(cached) = state.get_cached_history(&normalized_file_path) {
                     info!("SNAPSHOT_LIST: Found {} cached versions", cached.len());
@@ -724,8 +740,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     .strip_prefix(&repo.project.path)
                     .unwrap_or(&params.target_path)
                     .trim_start_matches('/');
-                match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name)
-                {
+                match repo.restore_symbol(clean_path, &params.content_hash, &params.symbol_name) {
                     Ok(_) => {
                         info!(
                             "Restored symbol '{}' in {} to {}",
@@ -944,7 +959,7 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     .get_recent_files(1000, None, None)
                     .unwrap_or_default();
                 let total_files = recent_files.len();
-                
+
                 let last_activity = repo
                     .db
                     .get_global_history(1)
@@ -1064,33 +1079,33 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 if let Ok(h) = repo.db.get_symbol_history(&params.symbol_name)
                     && !h.is_empty()
                 {
-                        for (sn, sym) in h {
-                            let commit_message = sn.commit_hash.as_ref().and_then(|h| {
-                                repo.db
-                                    .get_git_commit(h)
-                                    .ok()
-                                    .flatten()
-                                    .map(|(msg, _, _)| msg)
-                            });
-                            history.push(json!({
-                                "snapshot": protocol::SnapshotInfo {
-                                    id: sn.id,
-                                    file_path: sn.file_path,
-                                    timestamp: sn.timestamp,
-                                    content_hash: sn.content_hash,
-                                    git_branch: sn.git_branch,
-                                    commit_hash: sn.commit_hash,
-                                    commit_message,
-                                    checkpoint_name: sn.checkpoint_name,
-                                },
-                                "symbol_name": sym.name,
-                                "symbol_kind": sym.kind,
-                                "structural_hash": sym.structural_hash,
-                                "start_line": sym.start_line,
-                                "end_line": sym.end_line,
-                            }));
-                        }
-                        break;
+                    for (sn, sym) in h {
+                        let commit_message = sn.commit_hash.as_ref().and_then(|h| {
+                            repo.db
+                                .get_git_commit(h)
+                                .ok()
+                                .flatten()
+                                .map(|(msg, _, _)| msg)
+                        });
+                        history.push(json!({
+                            "snapshot": protocol::SnapshotInfo {
+                                id: sn.id,
+                                file_path: sn.file_path,
+                                timestamp: sn.timestamp,
+                                content_hash: sn.content_hash,
+                                git_branch: sn.git_branch,
+                                commit_hash: sn.commit_hash,
+                                commit_message,
+                                checkpoint_name: sn.checkpoint_name,
+                            },
+                            "symbol_name": sym.name,
+                            "symbol_kind": sym.kind,
+                            "structural_hash": sym.structural_hash,
+                            "start_line": sym.start_line,
+                            "end_line": sym.end_line,
+                        }));
+                    }
+                    break;
                 }
             }
             JsonRpcResponse::success(req.id, json!({ "history": history }))

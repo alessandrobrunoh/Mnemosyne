@@ -12,7 +12,8 @@ impl StepProgress {
         Self { theme }
     }
 
-    pub fn render(&self, steps: &[(&str, bool, bool)]) { // (label, completed, is_current)
+    pub fn render(&self, steps: &[(&str, bool, bool)]) {
+        // (label, completed, is_current)
         let mut row = String::new();
         for (i, (label, completed, current)) in steps.iter().enumerate() {
             if i > 0 {

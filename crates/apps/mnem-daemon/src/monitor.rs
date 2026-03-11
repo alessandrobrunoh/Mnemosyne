@@ -342,8 +342,7 @@ mod tests {
         fs::create_dir_all(&project_dir).unwrap();
 
         // Must register project first
-        let mut registry =
-            mnem_core::storage::registry::ProjectRegistry::new(&base_dir).unwrap();
+        let mut registry = mnem_core::storage::registry::ProjectRegistry::new(&base_dir).unwrap();
         registry.get_or_create(&project_dir).unwrap();
 
         let repo = Arc::new(Repository::open(base_dir, project_dir.clone()).unwrap());

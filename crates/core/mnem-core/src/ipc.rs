@@ -68,9 +68,7 @@ mod unix_impl {
     pub fn respond_unix(stream: &mut UnixStream, response: DaemonResponse) -> AppResult<()> {
         let data = serde_json::to_vec(&response)
             .map_err(|e| AppError::Internal(format!("Failed to serialize response: {}", e)))?;
-        stream
-            .write_all(&data)
-            .map_err(AppError::IoGeneric)?;
+        stream.write_all(&data).map_err(AppError::IoGeneric)?;
         Ok(())
     }
 
@@ -84,9 +82,7 @@ mod unix_impl {
             let data = serde_json::to_vec(&request)
                 .map_err(|e| AppError::Internal(format!("Failed to serialize request: {}", e)))?;
 
-            stream
-                .write_all(&data)
-                .map_err(AppError::IoGeneric)?;
+            stream.write_all(&data).map_err(AppError::IoGeneric)?;
             stream
                 .shutdown(std::net::Shutdown::Write)
                 .map_err(AppError::IoGeneric)?;
@@ -128,13 +124,9 @@ mod windows_impl {
     impl IpcServer {
         pub fn new(_socket_path: PathBuf) -> AppResult<Self> {
             let listener = TcpListener::bind("127.0.0.1:0").map_err(AppError::IoGeneric)?;
-            let port = listener
-                .local_addr()
-                .map_err(AppError::IoGeneric)?
-                .port();
+            let port = listener.local_addr().map_err(AppError::IoGeneric)?.port();
 
-            std::fs::write(get_port_file()?, port.to_string())
-                .map_err(AppError::IoGeneric)?;
+            std::fs::write(get_port_file()?, port.to_string()).map_err(AppError::IoGeneric)?;
 
             Ok(Self { listener, port })
         }
@@ -162,9 +154,7 @@ mod windows_impl {
     pub fn respond_tcp(stream: &mut TcpStream, response: DaemonResponse) -> AppResult<()> {
         let data = serde_json::to_vec(&response)
             .map_err(|e| AppError::Internal(format!("Failed to serialize response: {}", e)))?;
-        stream
-            .write_all(&data)
-            .map_err(AppError::IoGeneric)?;
+        stream.write_all(&data).map_err(AppError::IoGeneric)?;
         Ok(())
     }
 
@@ -186,9 +176,7 @@ mod windows_impl {
             let data = serde_json::to_vec(&request)
                 .map_err(|e| AppError::Internal(format!("Failed to serialize request: {}", e)))?;
 
-            stream
-                .write_all(&data)
-                .map_err(AppError::IoGeneric)?;
+            stream.write_all(&data).map_err(AppError::IoGeneric)?;
             stream
                 .shutdown(std::net::Shutdown::Write)
                 .map_err(AppError::IoGeneric)?;

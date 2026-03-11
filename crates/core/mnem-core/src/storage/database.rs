@@ -1555,47 +1555,47 @@ impl Database {
                     .get(sym_data.snapshot_id as u64)
                     .map_err(|e| AppError::Database(e.to_string()))?
             {
-                    let snap_data: SnapshotData = bincode::deserialize(sv.value())
-                        .map_err(|e| AppError::Internal(e.to_string()))?;
-                    let path = self.lookup_string(snap_data.file_path_id)?;
-                    let branch = if let Some(bid) = snap_data.git_branch_id {
-                        Some(self.lookup_string(bid)?)
-                    } else {
-                        None
-                    };
-                    let snap = Snapshot {
-                        id: snap_data.id,
-                        file_path: path,
-                        timestamp: snap_data.timestamp,
-                        content_hash: snap_data.content_hash,
-                        git_branch: branch,
-                        session_id: snap_data.session_id,
-                        commit_hash: snap_data.commit_hash,
-                        commit_message: snap_data.commit_message,
-                        checkpoint_name: snap_data.checkpoint_name,
-                    };
-                    let name = self.lookup_string(sym_data.name_id)?;
-                    let kind = self.lookup_string(sym_data.kind_id)?;
-                    let scope = if let Some(sid) = sym_data.scope_id {
-                        Some(self.lookup_string(sid)?)
-                    } else {
-                        None
-                    };
-                    let sym = SemanticSymbol {
-                        id: sym_data.id,
-                        name,
-                        kind,
-                        scope,
-                        snapshot_id: sym_data.snapshot_id,
-                        chunk_hash: sym_data.chunk_hash,
-                        structural_hash: sym_data.structural_hash,
-                        start_line: sym_data.start_line,
-                        end_line: sym_data.end_line,
-                        start_byte: sym_data.start_byte,
-                        end_byte: sym_data.end_byte,
-                        parent_id: sym_data.parent_id,
-                    };
-                    results.push((snap, sym));
+                let snap_data: SnapshotData = bincode::deserialize(sv.value())
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                let path = self.lookup_string(snap_data.file_path_id)?;
+                let branch = if let Some(bid) = snap_data.git_branch_id {
+                    Some(self.lookup_string(bid)?)
+                } else {
+                    None
+                };
+                let snap = Snapshot {
+                    id: snap_data.id,
+                    file_path: path,
+                    timestamp: snap_data.timestamp,
+                    content_hash: snap_data.content_hash,
+                    git_branch: branch,
+                    session_id: snap_data.session_id,
+                    commit_hash: snap_data.commit_hash,
+                    commit_message: snap_data.commit_message,
+                    checkpoint_name: snap_data.checkpoint_name,
+                };
+                let name = self.lookup_string(sym_data.name_id)?;
+                let kind = self.lookup_string(sym_data.kind_id)?;
+                let scope = if let Some(sid) = sym_data.scope_id {
+                    Some(self.lookup_string(sid)?)
+                } else {
+                    None
+                };
+                let sym = SemanticSymbol {
+                    id: sym_data.id,
+                    name,
+                    kind,
+                    scope,
+                    snapshot_id: sym_data.snapshot_id,
+                    chunk_hash: sym_data.chunk_hash,
+                    structural_hash: sym_data.structural_hash,
+                    start_line: sym_data.start_line,
+                    end_line: sym_data.end_line,
+                    start_byte: sym_data.start_byte,
+                    end_byte: sym_data.end_byte,
+                    parent_id: sym_data.parent_id,
+                };
+                results.push((snap, sym));
             }
         }
         results.sort_by(|a, b| b.0.timestamp.cmp(&a.0.timestamp));

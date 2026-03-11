@@ -111,8 +111,8 @@ impl CommandStrategy for ComponentsCommand {
             "crates/apps/main.rs".to_string(),
             "4.2 KB".to_string(),
         ]);
-        let table_pagination = PaginationInfo::new(1, 42, 20)
-            .with_info("FILTER".to_string(), "*.rs".to_string());
+        let table_pagination =
+            PaginationInfo::new(1, 42, 20).with_info("FILTER".to_string(), "*.rs".to_string());
         table.pagination(&table_pagination);
         println!();
 
@@ -170,8 +170,8 @@ impl CommandStrategy for ComponentsCommand {
         let list = List::new(theme.clone());
         list.bullet("First list item");
         list.numbered(2, "Second numbered item");
-        let list_pagination = PaginationInfo::new(1, 100, 20)
-            .with_info("STATUS".to_string(), "Testing".to_string());
+        let list_pagination =
+            PaginationInfo::new(1, 100, 20).with_info("STATUS".to_string(), "Testing".to_string());
         list.pagination(&list_pagination);
         println!();
 
