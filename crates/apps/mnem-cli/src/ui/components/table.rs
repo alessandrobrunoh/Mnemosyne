@@ -1,206 +1,100 @@
 use crate::theme::Theme;
+use crate::ui::components::pagination::PaginationInfo;
 use crossterm::style::Stylize;
 
-/// Pagination metadata for displaying table pagination information
-///
-/// Encapsulates all data needed to render pagination information consistently.
-///
-/// # Example
-/// ```rust
-/// use mnem_cli::ui::components::table::PaginationInfo;
-///
-/// let info = PaginationInfo::new(1, 100, 20)
-///     .with_info("STATUS".to_string(), "Listing".to_string())
-///     .with_info("FILE".to_string(), "Project".to_string());
-/// ```
+/// Column configuration for the Smart Table
 #[derive(Debug, Clone)]
-pub struct PaginationInfo {
-    pub current_page: usize,
-    pub total_items: usize,
-    pub items_per_page: usize,
-    pub additional_info: Vec<(String, String)>,
+pub struct Column {
+    pub header: String,
+    pub width: usize,
+    pub flex: bool,
 }
 
-impl PaginationInfo {
-    /// Create new pagination info
-    ///
-    /// # Arguments
-    /// * `current_page` - Current page number (1-indexed)
-    /// * `total_items` - Total number of items across all pages
-    /// * `items_per_page` - Number of items displayed per page
-    pub fn new(current_page: usize, total_items: usize, items_per_page: usize) -> Self {
+impl Column {
+    pub fn new(header: &str, width: usize) -> Self {
         Self {
-            current_page,
-            total_items,
-            items_per_page,
-            additional_info: Vec::new(),
+            header: header.to_string(),
+            width,
+            flex: false,
         }
     }
 
-    /// Add additional metadata to display in pagination footer
-    ///
-    /// # Example
-    /// ```rust
-    /// let info = PaginationInfo::new(1, 100, 20)
-    ///     .with_info("STATUS".to_string(), "Listing".to_string())
-    ///     .with_info("FILE".to_string(), "Project".to_string());
-    /// ```
-    pub fn with_info(mut self, label: String, value: String) -> Self {
-        self.additional_info.push((label, value));
-        self
-    }
-
-    /// Calculate total number of pages
-    pub fn total_pages(&self) -> usize {
-        if self.total_items == 0 {
-            1
-        } else {
-            (self.total_items as f64 / self.items_per_page as f64).ceil() as usize
+    pub fn flex(header: &str, min_width: usize) -> Self {
+        Self {
+            header: header.to_string(),
+            width: min_width,
+            flex: true,
         }
     }
 }
 
-/// Table component for displaying formatted tabular data in terminal UI
-///
-/// Provides styled table rendering with theme-aware coloring and formatting.
-/// Supports items, bullets, numbered entries, status indicators, and pagination.
-///
-/// # Example
-/// ```rust
-/// use mnem_cli::ui::components::table::Table;
-/// use mnem_cli::theme::Theme;
-///
-/// let table = Table::new(Theme::default());
-/// table.item("→", "First item");
-/// table.bullet("Second item");
-/// table.numbered(1, "Third item");
-/// ```
+/// A Smart & Symbolic Table component
 #[derive(Debug, Clone)]
 pub struct Table {
     theme: Theme,
+    columns: Vec<Column>,
 }
 
 impl Table {
-    /// Internal test rendering logic
-    pub fn test_output(&self) {
-        self.item("1", "First item");
-        self.bullet("Bullet item");
-        self.numbered(3, "Numbered item");
-        self.status_item("✓", "Success item", Some("v1.0"));
-        let info =
-            PaginationInfo::new(1, 100, 20).with_info("STATUS".to_string(), "Listing".to_string());
-        self.pagination(&info);
+    pub fn new(theme: Theme, columns: Vec<Column>) -> Self {
+        Self { theme, columns }
     }
 
-    /// Create a new table component with given theme
-    pub fn new(theme: Theme) -> Self {
-        Self { theme }
-    }
+    /// Render the table header with a thin separator
+    pub fn header(&self) {
+        let mut header_row = String::new();
+        let mut separator_row = String::new();
 
-    /// Display a single table row item with a label
-    ///
-    /// # Example
-    /// ```rust
-    /// table.item("→", "Project initialized successfully");
-    /// ```
-    pub fn item(&self, label: &str, content: &str) {
-        println!(
-            "  {} {}",
-            label.with(self.theme.accent).bold(),
-            content.with(self.theme.text)
-        );
-    }
+        for (i, col) in self.columns.iter().enumerate() {
+            let space = if i == 0 { "" } else { "  " };
+            header_row.push_str(space);
+            separator_row.push_str(space);
 
-    /// Display a bullet point item
-    ///
-    /// # Example
-    /// ```rust
-    /// table.bullet("File saved successfully");
-    /// ```
-    pub fn bullet(&self, content: &str) {
-        println!(
-            "  {} {}",
-            "•".with(self.theme.accent),
-            content.with(self.theme.text)
-        );
-    }
+            let header = format!("{: <width$}", col.header, width = col.width);
+            header_row.push_str(&header.with(self.theme.text_dim).bold().to_string());
 
-    /// Display a numbered item
-    ///
-    /// # Example
-    /// ```rust
-    /// table.numbered(1, "First item");
-    /// ```
-    pub fn numbered(&self, number: usize, content: &str) {
-        println!(
-            "  {: <4} {}",
-            format!("{}.", number).with(self.theme.accent).bold(),
-            content.with(self.theme.text)
-        );
-    }
-
-    /// Display an item with status indicator
-    ///
-    /// # Example
-    /// ```rust
-    /// table.status_item("✓", "Task completed", Some("2.3s"));
-    /// ```
-    pub fn status_item(&self, status: &str, content: &str, meta: Option<&str>) {
-        let meta_str = match meta {
-            Some(m) => format!(" {}", m.with(self.theme.text_dim)),
-            None => String::new(),
-        };
-        println!(
-            "  {} {}{}",
-            status.with(self.theme.success).bold(),
-            content.with(self.theme.text),
-            meta_str
-        );
-    }
-
-    /// Display a nested item (indented)
-    ///
-    /// # Example
-    /// ```rust
-    /// table.nested("Sub-item with additional information");
-    /// ```
-    pub fn nested(&self, content: &str) {
-        println!(
-            "    {} {}",
-            "└─".with(self.theme.text_dim),
-            content.with(self.theme.text_dim)
-        );
-    }
-
-    /// Display multiple items from a slice
-    ///
-    /// # Example
-    /// ```rust
-    /// let items = vec![("First", "Description 1"), ("Second", "Description 2")];
-    /// table.items(&items);
-    /// ```
-    pub fn items(&self, items: &[(impl AsRef<str>, impl AsRef<str>)]) {
-        for (label, content) in items {
-            self.item(label.as_ref(), content.as_ref());
+            let sep = "─".repeat(col.width);
+            separator_row.push_str(&sep.with(self.theme.text_dim).to_string());
         }
+
+        println!("  {}", header_row);
+        println!("  {}", separator_row);
+    }
+
+    /// Render a single data row
+    pub fn row(&self, data: &[String]) {
+        let mut row_str = String::new();
+
+        for (i, col) in self.columns.iter().enumerate() {
+            let space = if i == 0 { "" } else { "  " };
+            row_str.push_str(space);
+
+            let val = data.get(i).cloned().unwrap_or_default();
+            let truncated = if val.len() > col.width {
+                format!("{}…", &val[..col.width - 1])
+            } else {
+                format!("{: <width$}", val, width = col.width)
+            };
+
+            // Highlight based on column index or content could be added here
+            if i == 0 {
+                // Type/Icon column
+                row_str.push_str(&truncated.with(self.theme.accent).bold().to_string());
+            } else if i == 1 {
+                // Hash column
+                row_str.push_str(&truncated.with(self.theme.text_bright).to_string());
+            } else {
+                row_str.push_str(&truncated.with(self.theme.text).to_string());
+            }
+        }
+
+        println!("  {}", row_str);
     }
 
     /// Display pagination information footer
-    ///
-    /// Shows current page, total pages, total items, and any additional metadata.
-    /// Consistent formatting across all paginated views.
-    ///
-    /// # Example
-    /// ```rust
-    /// let info = PaginationInfo::new(1, 100, 20)
-    ///     .with_info("STATUS".to_string(), "Listing".to_string())
-    ///     .with_info("FILE".to_string(), "Project".to_string());
-    /// table.pagination(&info);
-    /// ```
     pub fn pagination(&self, info: &PaginationInfo) {
         let total_pages = info.total_pages();
 
-        // Build the output string with consistent spacing
         let mut parts = vec![
             format!(
                 "{} {}/{}",
@@ -215,7 +109,6 @@ impl Table {
             ),
         ];
 
-        // Add additional info (STATUS, FILE, etc.)
         for (label, value) in &info.additional_info {
             parts.push(format!(
                 "{} {}",
@@ -226,58 +119,5 @@ impl Table {
 
         println!();
         println!("  {}", parts.join("  "));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_table_creation() {
-        let theme = Theme::default();
-        let table = Table::new(theme);
-
-        // Test that methods don't panic
-        table.item("→", "Test item");
-        table.bullet("Bullet item");
-        table.numbered(1, "Numbered item");
-        table.status_item("✓", "Status item", Some("1.2s"));
-        table.nested("Nested item");
-    }
-
-    #[test]
-    fn test_pagination_info() {
-        let info = PaginationInfo::new(1, 100, 20);
-        assert_eq!(info.current_page, 1);
-        assert_eq!(info.total_items, 100);
-        assert_eq!(info.items_per_page, 20);
-        assert_eq!(info.total_pages(), 5);
-    }
-
-    #[test]
-    fn test_pagination_info_with_additional() {
-        let info = PaginationInfo::new(1, 100, 20)
-            .with_info("STATUS".to_string(), "Listing".to_string())
-            .with_info("FILE".to_string(), "Project".to_string());
-
-        assert_eq!(info.additional_info.len(), 2);
-        assert_eq!(info.additional_info[0].0, "STATUS");
-        assert_eq!(info.additional_info[1].0, "FILE");
-    }
-
-    #[test]
-    fn test_pagination_edge_cases() {
-        // Zero items
-        let info = PaginationInfo::new(1, 0, 20);
-        assert_eq!(info.total_pages(), 1);
-
-        // Exact page boundary
-        let info = PaginationInfo::new(1, 100, 20);
-        assert_eq!(info.total_pages(), 5);
-
-        // Partial last page
-        let info = PaginationInfo::new(1, 105, 20);
-        assert_eq!(info.total_pages(), 6);
     }
 }

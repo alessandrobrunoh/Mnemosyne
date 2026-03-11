@@ -46,17 +46,17 @@ mod unix_impl {
     impl IpcServer {
         pub fn new(socket_path: PathBuf) -> AppResult<Self> {
             let _ = std::fs::remove_file(&socket_path);
-            let listener = UnixListener::bind(&socket_path).map_err(|e| AppError::IoGeneric(e))?;
+            let listener = UnixListener::bind(&socket_path).map_err(AppError::IoGeneric)?;
             Ok(Self { listener })
         }
 
         pub fn accept(&self) -> AppResult<(UnixStream, DaemonRequest)> {
-            let (mut stream, _) = self.listener.accept().map_err(|e| AppError::IoGeneric(e))?;
+            let (mut stream, _) = self.listener.accept().map_err(AppError::IoGeneric)?;
 
             let mut buffer = Vec::new();
             stream
                 .read_to_end(&mut buffer)
-                .map_err(|e| AppError::IoGeneric(e))?;
+                .map_err(AppError::IoGeneric)?;
 
             let request: DaemonRequest = serde_json::from_slice(&buffer)
                 .map_err(|e| AppError::Internal(format!("Failed to parse request: {}", e)))?;
@@ -68,9 +68,7 @@ mod unix_impl {
     pub fn respond_unix(stream: &mut UnixStream, response: DaemonResponse) -> AppResult<()> {
         let data = serde_json::to_vec(&response)
             .map_err(|e| AppError::Internal(format!("Failed to serialize response: {}", e)))?;
-        stream
-            .write_all(&data)
-            .map_err(|e| AppError::IoGeneric(e))?;
+        stream.write_all(&data).map_err(AppError::IoGeneric)?;
         Ok(())
     }
 
@@ -84,17 +82,15 @@ mod unix_impl {
             let data = serde_json::to_vec(&request)
                 .map_err(|e| AppError::Internal(format!("Failed to serialize request: {}", e)))?;
 
-            stream
-                .write_all(&data)
-                .map_err(|e| AppError::IoGeneric(e))?;
+            stream.write_all(&data).map_err(AppError::IoGeneric)?;
             stream
                 .shutdown(std::net::Shutdown::Write)
-                .map_err(|e| AppError::IoGeneric(e))?;
+                .map_err(AppError::IoGeneric)?;
 
             let mut buffer = Vec::new();
             stream
                 .read_to_end(&mut buffer)
-                .map_err(|e| AppError::IoGeneric(e))?;
+                .map_err(AppError::IoGeneric)?;
 
             let response: DaemonResponse = serde_json::from_slice(&buffer)
                 .map_err(|e| AppError::Internal(format!("Failed to parse response: {}", e)))?;
@@ -103,7 +99,7 @@ mod unix_impl {
         }
 
         pub fn is_running(socket_path: &PathBuf) -> bool {
-            matches!(UnixStream::connect(socket_path), Ok(_))
+            UnixStream::connect(socket_path).is_ok()
         }
     }
 }
@@ -113,11 +109,11 @@ mod windows_impl {
     use super::*;
     use std::net::{TcpListener, TcpStream};
 
-    fn get_port_file() -> PathBuf {
-        dirs::home_dir()
-            .expect("Home dir not found")
+    fn get_port_file() -> AppResult<PathBuf> {
+        Ok(dirs::home_dir()
+            .ok_or_else(|| AppError::Internal("Home directory not found".into()))?
             .join(".mnemosyne")
-            .join("daemon.port")
+            .join("daemon.port"))
     }
 
     pub struct IpcServer {
@@ -127,26 +123,22 @@ mod windows_impl {
 
     impl IpcServer {
         pub fn new(_socket_path: PathBuf) -> AppResult<Self> {
-            let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| AppError::IoGeneric(e))?;
-            let port = listener
-                .local_addr()
-                .map_err(|e| AppError::IoGeneric(e))?
-                .port();
+            let listener = TcpListener::bind("127.0.0.1:0").map_err(AppError::IoGeneric)?;
+            let port = listener.local_addr().map_err(AppError::IoGeneric)?.port();
 
-            std::fs::write(get_port_file(), port.to_string())
-                .map_err(|e| AppError::IoGeneric(e))?;
+            std::fs::write(get_port_file()?, port.to_string()).map_err(AppError::IoGeneric)?;
 
             Ok(Self { listener, port })
         }
 
         pub fn accept(&self) -> AppResult<(TcpStream, DaemonRequest)> {
-            let (stream, _) = self.listener.accept().map_err(|e| AppError::IoGeneric(e))?;
+            let (stream, _) = self.listener.accept().map_err(AppError::IoGeneric)?;
 
             let mut buffer = Vec::new();
-            let mut stream_read = stream.try_clone().map_err(|e| AppError::IoGeneric(e))?;
+            let mut stream_read = stream.try_clone().map_err(AppError::IoGeneric)?;
             stream_read
                 .read_to_end(&mut buffer)
-                .map_err(|e| AppError::IoGeneric(e))?;
+                .map_err(AppError::IoGeneric)?;
 
             let request: DaemonRequest = serde_json::from_slice(&buffer)
                 .map_err(|e| AppError::Internal(format!("Failed to parse request: {}", e)))?;
@@ -162,9 +154,7 @@ mod windows_impl {
     pub fn respond_tcp(stream: &mut TcpStream, response: DaemonResponse) -> AppResult<()> {
         let data = serde_json::to_vec(&response)
             .map_err(|e| AppError::Internal(format!("Failed to serialize response: {}", e)))?;
-        stream
-            .write_all(&data)
-            .map_err(|e| AppError::IoGeneric(e))?;
+        stream.write_all(&data).map_err(AppError::IoGeneric)?;
         Ok(())
     }
 
@@ -172,7 +162,7 @@ mod windows_impl {
 
     impl IpcClient {
         pub fn send(_socket_path: &PathBuf, request: DaemonRequest) -> AppResult<DaemonResponse> {
-            let port_file = get_port_file();
+            let port_file = get_port_file()?;
 
             let port = std::fs::read_to_string(&port_file)
                 .map_err(|e| AppError::Internal(format!("Daemon not running: {}", e)))?
@@ -186,17 +176,15 @@ mod windows_impl {
             let data = serde_json::to_vec(&request)
                 .map_err(|e| AppError::Internal(format!("Failed to serialize request: {}", e)))?;
 
-            stream
-                .write_all(&data)
-                .map_err(|e| AppError::IoGeneric(e))?;
+            stream.write_all(&data).map_err(AppError::IoGeneric)?;
             stream
                 .shutdown(std::net::Shutdown::Write)
-                .map_err(|e| AppError::IoGeneric(e))?;
+                .map_err(AppError::IoGeneric)?;
 
             let mut buffer = Vec::new();
             stream
                 .read_to_end(&mut buffer)
-                .map_err(|e| AppError::IoGeneric(e))?;
+                .map_err(AppError::IoGeneric)?;
 
             let response: DaemonResponse = serde_json::from_slice(&buffer)
                 .map_err(|e| AppError::Internal(format!("Failed to parse response: {}", e)))?;
@@ -205,19 +193,14 @@ mod windows_impl {
         }
 
         pub fn is_running(_socket_path: &PathBuf) -> bool {
-            let port_file = get_port_file();
-
-            if let Ok(port_str) = std::fs::read_to_string(&port_file) {
-                if let Ok(port) = port_str.trim().parse::<u16>() {
-                    return TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+            if let Ok(port_file) = get_port_file() {
+                if let Ok(port_str) = std::fs::read_to_string(&port_file) {
+                    if let Ok(port) = port_str.trim().parse::<u16>() {
+                        return TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+                    }
                 }
             }
             false
         }
     }
-}
-
-pub fn get_socket_path() -> PathBuf {
-    let home = dirs::home_dir().expect("Home directory not found");
-    home.join(".mnemosyne").join("mnemd.sock")
 }

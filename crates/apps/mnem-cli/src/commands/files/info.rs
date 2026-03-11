@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};

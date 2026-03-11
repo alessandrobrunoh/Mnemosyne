@@ -23,13 +23,13 @@ impl StorageLayer for ColdLayer {
         fs::write(path, compressed).map_err(AppError::IoGeneric)
     }
 
-    fn read(&self, hash: &str) -> AppResult<Option<Vec<u8>>> {
+    fn read(&self, hash: &str) -> AppResult<Option<bytes::Bytes>> {
         let path = self.root.join(hash);
         if path.exists() {
             let compressed = fs::read(path).map_err(AppError::IoGeneric)?;
             let decompressed = zstd::decode_all(&compressed[..])
                 .map_err(|e| AppError::Internal(format!("Zstd decompress error: {}", e)))?;
-            Ok(Some(decompressed))
+            Ok(Some(bytes::Bytes::from(decompressed)))
         } else {
             Ok(None)
         }

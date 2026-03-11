@@ -11,4 +11,8 @@ pub use layout::Layout;
 pub use layout::LayoutBuilder;
 pub use presentable::Renderable;
 
-pub use components::{ActivityGraph, BranchBadge, Elements, Hyperlink, Messages, Status, Table};
+pub use components::{
+    Banner, BranchBadge, Breadcrumbs, Card, CodeBlock, Column, DiffBar, DiffView, Elements, Gauge,
+    Highlight, Hyperlink, KeyHint, List, Messages, MetadataGrid, PaginationInfo, Spinner,
+    StepProgress, Table, Timeline,
+};

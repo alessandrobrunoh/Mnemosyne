@@ -54,9 +54,17 @@ pub fn get_registry_path() -> AppResult<PathBuf> {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn get_env_mutex() -> &'static Mutex<()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn test_get_base_dir_env_override() {
+        let _lock = get_env_mutex().lock().unwrap();
         // Use a platform-appropriate absolute path
         let test_path = if cfg!(windows) {
             r"C:\temp\mnemosyne_test"
@@ -74,6 +82,7 @@ mod tests {
 
     #[test]
     fn test_get_base_dir_relative_path_rejected() {
+        let _lock = get_env_mutex().lock().unwrap();
         unsafe { env::set_var(ENV_DATA_DIR, "relative/path") };
 
         let result = get_base_dir();

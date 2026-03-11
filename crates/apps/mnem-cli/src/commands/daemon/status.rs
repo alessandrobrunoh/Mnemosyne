@@ -86,6 +86,7 @@ impl Renderable for StatusResponse {
 
 /// Show daemon status and performance metrics
 #[derive(Args, Clone, Debug)]
+#[command(alias = "s")]
 pub struct StatusCommand;
 
 impl CommandStrategy for StatusCommand {
