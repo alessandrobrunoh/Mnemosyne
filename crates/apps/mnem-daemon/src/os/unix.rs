@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::info;
-use tokio::net::UnixListener;
 use std::path::Path;
+use tokio::net::UnixListener;
 
 pub async fn bind_socket(socket_path: &Path) -> Result<UnixListener> {
     if socket_path.exists() {

@@ -3,11 +3,11 @@ use log::{error, info, warn};
 use mnem_core::env::get_base_dir;
 use mnem_core::protocol::{self, JsonRpcRequest, JsonRpcResponse, PID_FILE};
 
-use mnem_core::storage::registry::ProjectRegistry;
 use mnem_core::Repository;
-use mnem_daemon::{DaemonState, Monitor};
-use mnem_daemon::rpc_handler::handle_request;
+use mnem_core::storage::registry::ProjectRegistry;
 use mnem_daemon::maintenance::run_background_maintenance;
+use mnem_daemon::rpc_handler::handle_request;
+use mnem_daemon::{DaemonState, Monitor};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -42,7 +42,11 @@ async fn restore_watched_projects(base_dir: &PathBuf, state: &Arc<DaemonState>) 
         match Repository::open(base_dir.clone(), project_path.clone()) {
             Ok(repo) => {
                 let repo = Arc::new(repo);
-                let monitor = Arc::new(Monitor::with_state(project_path, repo.clone(), state.clone()));
+                let monitor = Arc::new(Monitor::with_state(
+                    project_path,
+                    repo.clone(),
+                    state.clone(),
+                ));
 
                 let scan_path = path_key.clone();
                 let monitor_scan = monitor.clone();
@@ -62,7 +66,6 @@ async fn restore_watched_projects(base_dir: &PathBuf, state: &Arc<DaemonState>) 
                 state.repos.insert(path_key.clone(), repo);
                 state.monitors.insert(path_key.clone(), monitor);
 
-
                 info!("Auto-watching restored project: {}", path_key);
             }
             Err(e) => {
@@ -76,7 +79,6 @@ async fn restore_watched_projects(base_dir: &PathBuf, state: &Arc<DaemonState>) 
 async fn main() -> Result<()> {
     let base_dir = get_base_dir()?;
     std::fs::create_dir_all(&base_dir)?;
-
 
     let log_dir = base_dir.join("logs");
     std::fs::create_dir_all(&log_dir)?;
@@ -115,7 +117,6 @@ async fn main() -> Result<()> {
     info!("Secure auth token generated.");
 
     let state = Arc::new(DaemonState::new(auth_token));
-
 
     let restore_state = state.clone();
     let restore_base_dir = base_dir.clone();
@@ -214,7 +215,11 @@ where
         let is_authorized = request.auth_token.as_ref() == Some(&state.auth_token);
 
         if !is_authorized && request.method != protocol::methods::STATUS {
-            let err_resp = JsonRpcResponse::error(request.id, -32001, "Unauthorized: Invalid or missing auth token".into());
+            let err_resp = JsonRpcResponse::error(
+                request.id,
+                -32001,
+                "Unauthorized: Invalid or missing auth token".into(),
+            );
             let resp_json = serde_json::to_string(&err_resp)? + "\n";
             writer.write_all(resp_json.as_bytes()).await?;
             continue;
@@ -228,4 +233,3 @@ where
 
     Ok(())
 }
-

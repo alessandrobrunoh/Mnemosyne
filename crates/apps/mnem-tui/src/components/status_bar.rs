@@ -1,10 +1,10 @@
 use crate::app::{AppState, Focus, ViewState};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
-    Frame,
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {

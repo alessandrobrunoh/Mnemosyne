@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::info;
 use std::path::Path;
-use tokio::net::windows::named_pipe::{ServerOptions, NamedPipeServer};
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 pub struct WindowsListener {
     pipe_name: String,
@@ -18,7 +18,7 @@ impl WindowsListener {
         let server = ServerOptions::new()
             .first_pipe_instance(true)
             .create(&self.pipe_name)?;
-        
+
         server.connect().await?;
         Ok(server)
     }

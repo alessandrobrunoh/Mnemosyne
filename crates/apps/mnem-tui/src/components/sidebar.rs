@@ -1,11 +1,11 @@
 use crate::app::{AppState, Focus, HistoryItem};
 use crate::components::shared::{ComponentFocus, ZedBlock};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem},
-    Frame,
 };
 
 pub fn render_files(f: &mut Frame, area: Rect, state: &mut AppState) {

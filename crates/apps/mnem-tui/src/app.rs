@@ -1,4 +1,4 @@
-use crate::theme::{Theme, THEMES};
+use crate::theme::{THEMES, Theme};
 use mnem_core::config::Config;
 use mnem_core::models::{FileEntry, SearchResult, Snapshot};
 use ratatui::text::Line;

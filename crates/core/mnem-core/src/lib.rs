@@ -13,5 +13,5 @@ pub mod utils;
 
 pub use config::ConfigManager;
 pub use error::{AppError, AppResult};
-pub use storage::fs::CasStorage;
 pub use storage::Repository;
+pub use storage::fs::CasStorage;

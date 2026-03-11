@@ -3,9 +3,9 @@ use crate::components::{
     header, preview, projects, search, settings, shared::ZedBlock, sidebar, stats, status_bar,
 };
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     widgets::Clear,
-    Frame,
 };
 
 pub fn render(f: &mut Frame, state: &mut AppState) {

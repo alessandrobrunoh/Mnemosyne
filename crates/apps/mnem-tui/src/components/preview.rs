@@ -1,9 +1,9 @@
 use crate::app::{AppState, Focus};
 use crate::components::shared::{ComponentFocus, ZedBlock};
 use ratatui::{
+    Frame,
     layout::Rect,
     widgets::{Paragraph, Wrap},
-    Frame,
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {

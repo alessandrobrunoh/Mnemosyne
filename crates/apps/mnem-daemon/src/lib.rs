@@ -1,9 +1,9 @@
-pub mod monitor;
-pub mod power;
-pub mod os;
-pub mod state;
-pub mod rpc_handler;
 pub mod maintenance;
+pub mod monitor;
+pub mod os;
+pub mod power;
+pub mod rpc_handler;
+pub mod state;
 
 pub use monitor::Monitor;
 pub use power::PowerProfile;

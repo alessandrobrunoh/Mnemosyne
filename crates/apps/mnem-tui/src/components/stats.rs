@@ -1,11 +1,11 @@
 use crate::app::AppState;
 use crate::components::shared::ZedBlock;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Sparkline},
-    Frame,
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {

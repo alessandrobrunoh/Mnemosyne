@@ -11,8 +11,12 @@ async fn test_repository_lifecycle() {
     let project_dir = dir.path().join("project");
     let project_mnem_dir = project_dir.join(".mnemosyne");
     fs::create_dir_all(&project_mnem_dir).unwrap();
-    fs::write(project_mnem_dir.join("tracked"), "project_id: lifecycle-test").unwrap();
-    
+    fs::write(
+        project_mnem_dir.join("tracked"),
+        "project_id: lifecycle-test",
+    )
+    .unwrap();
+
     let repo = Repository::open(base_dir, project_dir).unwrap();
 
     let file_path = repo.project.path.clone() + "/test.txt";
