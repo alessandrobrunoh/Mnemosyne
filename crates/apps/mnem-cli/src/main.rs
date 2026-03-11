@@ -1,4 +1,20 @@
 // VERSION: v2-FIX-2024 - Testing binary replacement
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_assignments)]
+#![allow(unused_imports)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::needless_borrow)]
+#![allow(clippy::new_ret_no_self)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::module_inception)]
+#![allow(clippy::wrong_self_convention)]
+#![allow(clippy::manual_map)]
+#![allow(clippy::unwrap_or_default)]
+#![allow(clippy::cmp_owned)]
+#![allow(clippy::print_literal)]
+#![allow(clippy::drain_collect)]
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;

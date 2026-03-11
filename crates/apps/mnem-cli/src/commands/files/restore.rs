@@ -1,8 +1,6 @@
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
-use std::path::Component;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Renderable};
@@ -151,10 +149,7 @@ impl CommandStrategy for RestoreCommand {
 
         let daemon = DaemonClient::connect().ok();
         let repo_opt: Option<Repository> = if daemon.is_none() {
-            match Repository::open(base_dir.clone(), project_path.clone()) {
-                Ok(r) => Some(r),
-                Err(_) => None,
-            }
+            Repository::open(base_dir.clone(), project_path.to_path_buf()).ok()
         } else {
             None
         };
@@ -365,37 +360,27 @@ impl CommandStrategy for RestoreCommand {
 }
 
 fn cleanup_old_temp_files() {
-    let cwd = std::env::current_dir().ok();
-    if cwd.is_none() {
+    let Ok(cwd) = std::env::current_dir() else {
         return;
-    }
-    let cwd = cwd.unwrap();
+    };
 
-    let entries = fs::read_dir(&cwd).ok();
-    if entries.is_none() {
+    let Ok(entries) = fs::read_dir(cwd) else {
         return;
-    }
+    };
 
     let now = SystemTime::now();
     let duration = Duration::from_secs(60 * 60); // 1 hour
 
-    for entry in entries.unwrap() {
-        let entry = entry.ok();
-        if entry.is_none() {
-            continue;
-        }
-        let entry = entry.unwrap();
-
+    for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
             continue;
         }
 
-        let name = path.file_name();
-        if name.is_none() {
+        let Some(name) = path.file_name() else {
             continue;
-        }
-        let name = name.unwrap().to_string_lossy();
+        };
+        let name = name.to_string_lossy();
 
         // Look for .mnemosyne_restore_<timestamp>_<random> files
         if !name.starts_with(".mnemosyne_restore_") {
@@ -403,23 +388,21 @@ fn cleanup_old_temp_files() {
         }
 
         let modified = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-        if let Some(modified) = modified {
-            if let Ok(age) = now.duration_since(modified) {
-                if age > duration {
-                    let _ = fs::remove_file(&path);
-                }
-            }
+        if let Some(modified) = modified
+            && let Ok(age) = now.duration_since(modified)
+            && age > duration
+        {
+            let _ = fs::remove_file(&path);
         }
     }
 }
 
 fn get_project_from_file(file: &Option<String>) -> Result<PathBuf> {
-    if let Some(f) = file {
-        if std::path::Path::new(f).is_absolute() {
-            if let Some(parent) = std::path::Path::new(f).parent() {
-                return Ok(parent.to_path_buf());
-            }
-        }
+    if let Some(f) = file
+        && std::path::Path::new(f).is_absolute()
+        && let Some(parent) = std::path::Path::new(f).parent()
+    {
+        return Ok(parent.to_path_buf());
     }
 
     std::env::current_dir().map_err(|e| anyhow::anyhow!("Cannot get current directory: {}", e))
@@ -428,7 +411,7 @@ fn get_project_from_file(file: &Option<String>) -> Result<PathBuf> {
 fn get_history_for_restore(
     _daemon: Option<()>,
     repo: Option<&Repository>,
-    project_path: &PathBuf,
+    project_path: &Path,
     file_path: &str,
     _client: &mut Option<DaemonClient>,
 ) -> Result<Vec<SnapshotInfo>> {

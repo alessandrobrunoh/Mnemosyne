@@ -135,15 +135,14 @@ impl Monitor {
 
                     for entry in walker.filter_map(|r| r.ok()) {
                         let path = entry.path();
-                        if path.is_file() && !self.is_ignored(path, Some(&mnemignore)) {
-                            // Check if this file has any snapshots at all
-                            if let Ok(history) = self.repo.get_history(&path.to_string_lossy()) {
-                                if history.is_empty() {
-                                    // This is a new file, save it
-                                    log::info!("Polling: found new file {:?}", path);
-                                    self.process_file(path, max_file_size);
-                                }
-                            }
+                        if path.is_file()
+                            && !self.is_ignored(path, Some(&mnemignore))
+                            && let Ok(history) = self.repo.get_history(&path.to_string_lossy())
+                            && history.is_empty()
+                        {
+                            // This is a new file, save it
+                            log::info!("Polling: found new file {:?}", path);
+                            self.process_file(path, max_file_size);
                         }
                     }
                 }
@@ -154,20 +153,17 @@ impl Monitor {
 
                         for snapshot in recent_snapshots {
                             let file_path = PathBuf::from(&snapshot.file_path);
-                            if !self.is_ignored(&file_path, Some(&mnemignore)) {
-                                if let Ok(metadata) = file_path.metadata() {
-                                    if let Ok(modified) = metadata.modified() {
-                                        // Parse snapshot time and check if file was modified more recently
-                                        if let Ok(snapshot_dt) = chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp) {
-                                            let snapshot_time: SystemTime = snapshot_dt.into();
-                                            if let Ok(modified_dt) = modified.duration_since(snapshot_time) {
-                                                // File was modified after last snapshot
-                                                if modified_dt.as_secs() > 0 {
-                                                    missed_changes.push(file_path);
-                                                }
-                                            }
-                                        }
-                                    }
+                            if !self.is_ignored(&file_path, Some(&mnemignore))
+                                && let Ok(metadata) = file_path.metadata()
+                                && let Ok(modified) = metadata.modified()
+                                && let Ok(snapshot_dt) =
+                                    chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp)
+                            {
+                                let snapshot_time: SystemTime = snapshot_dt.into();
+                                if let Ok(modified_dt) = modified.duration_since(snapshot_time)
+                                    && modified_dt.as_secs() > 0
+                                {
+                                    missed_changes.push(file_path);
                                 }
                             }
                         }
@@ -190,19 +186,18 @@ impl Monitor {
         }
 
         // Symlink protection: resolve and verify the file is inside the project root (audit 1.3)
-        if let Ok(canonical) = path.canonicalize() {
-            if let Ok(root_canonical) = self.root_path.canonicalize() {
-                if !canonical.starts_with(&root_canonical) {
-                    return; // Symlink pointing outside the project
-                }
-            }
+        if let Ok(canonical) = path.canonicalize()
+            && let Ok(root_canonical) = self.root_path.canonicalize()
+            && !canonical.starts_with(&root_canonical)
+        {
+            return; // Symlink pointing outside the project
         }
 
         // File size limit (audit 4.6)
-        if let Ok(metadata) = path.metadata() {
-            if metadata.len() > max_file_size {
-                return; // Skip files exceeding size limit
-            }
+        if let Ok(metadata) = path.metadata()
+            && metadata.len() > max_file_size
+        {
+            return; // Skip files exceeding size limit
         }
 
         // Check binary content
@@ -293,10 +288,10 @@ impl Monitor {
             return true;
         }
 
-        if let Some(mi) = mnemignore {
-            if mi.matched(relative, false).is_ignore() {
-                return true;
-            }
+        if let Some(mi) = mnemignore
+            && mi.matched(relative, false).is_ignore()
+        {
+            return true;
         }
         false
     }
@@ -320,17 +315,16 @@ impl Monitor {
         }
 
         // 2. Project-level .mnemignore
-        if config.storage.use_mnemosyneignore {
-            if let Some(ignore_path) =
+        if config.storage.use_mnemosyneignore
+            && let Some(ignore_path) =
                 Some(self.root_path.join(".mnemosyneignore")).filter(|p| p.exists())
-            {
-                builder.add(ignore_path);
-            }
+        {
+            builder.add(ignore_path);
         }
 
-        Ok(builder
+        builder
             .build()
-            .map_err(|e| AppError::Config(format!("Mnemignore build failed: {}", e)))?)
+            .map_err(|e| AppError::Config(format!("Mnemignore build failed: {}", e)))
     }
 }
 
@@ -343,8 +337,13 @@ mod tests {
     fn setup_monitor() -> (TempDir, Monitor, Arc<Repository>) {
         let dir = TempDir::new().unwrap();
         let base_dir = dir.path().join(".mnemosyne");
+        fs::create_dir_all(&base_dir).unwrap();
         let project_dir = dir.path().join("project");
         fs::create_dir_all(&project_dir).unwrap();
+
+        // Must register project first
+        let mut registry = mnem_core::storage::registry::ProjectRegistry::new(&base_dir).unwrap();
+        registry.get_or_create(&project_dir).unwrap();
 
         let repo = Arc::new(Repository::open(base_dir, project_dir.clone()).unwrap());
         let monitor = Monitor::new(project_dir, repo.clone());

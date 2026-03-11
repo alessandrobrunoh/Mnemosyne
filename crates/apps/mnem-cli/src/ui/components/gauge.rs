@@ -24,7 +24,7 @@ impl Gauge {
         } else {
             self.theme.success
         });
-        
+
         let bar_empty = "░".repeat(empty).with(self.theme.text_dim);
 
         println!(

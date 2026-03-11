@@ -25,7 +25,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ])
         .split(inner_area);
 
-    let options = vec![
+    let options = [
         (
             "Retention",
             format!("{} days", state.config.storage.retention_days),

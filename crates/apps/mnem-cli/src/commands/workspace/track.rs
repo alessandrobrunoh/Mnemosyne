@@ -1,9 +1,8 @@
 use crate::commands::common::{CommandStrategy, GlobalOptions};
-use crate::ui::{Layout, List, PaginationInfo};
 use crate::ui::presentable::Renderable;
+use crate::ui::{Layout, List, PaginationInfo};
 use anyhow::Result;
 use clap::Args;
-use crossterm::style::Stylize;
 use serde::Serialize;
 
 #[derive(Serialize)]

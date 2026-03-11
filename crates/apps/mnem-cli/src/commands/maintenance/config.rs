@@ -207,7 +207,7 @@ impl CommandStrategy for ConfigCommand {
             let normalized_key = normalize_key(key.as_str());
             let value = config_manager
                 .get_value(&normalized_key)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .ok_or_else(|| anyhow::anyhow!("Unknown config key: {}", key))?;
 
             if global_opts.json {
                 println!(

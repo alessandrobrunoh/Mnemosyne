@@ -24,16 +24,30 @@ impl Card {
 
         // Title line
         let title_icon = "󱂵";
-        let title_line = format!("│ {} {: <width$} │", title_icon, self.title, width = self.width - 7);
+        let title_line = format!(
+            "│ {} {: <width$} │",
+            title_icon,
+            self.title,
+            width = self.width - 7
+        );
         println!("  {}", title_line.with(self.theme.accent).bold());
 
         // Separator
-        let sep = format!("│ {: <width$} │", "─".repeat(self.width - 4), width = self.width - 4);
+        let sep = format!(
+            "│ {: <width$} │",
+            "─".repeat(self.width - 4),
+            width = self.width - 4
+        );
         println!("  {}", sep.with(self.theme.border));
 
         // Content lines
         for (label, value) in content {
-            let line = format!("│ {}: {: <width$} │", label, value, width = self.width - label.len() - 6);
+            let line = format!(
+                "│ {}: {: <width$} │",
+                label,
+                value,
+                width = self.width - label.len() - 6
+            );
             println!("  {}", line.with(self.theme.text));
         }
 

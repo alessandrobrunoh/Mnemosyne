@@ -20,7 +20,11 @@ impl Spinner {
     /// Display a static spinner frame with a message
     pub fn frame(&self, step: usize, message: &str) {
         let frame = self.frames[step % self.frames.len()];
-        print!("\r{} {}", frame.with(self.theme.accent).bold(), message.with(self.theme.text));
+        print!(
+            "\r{} {}",
+            frame.with(self.theme.accent).bold(),
+            message.with(self.theme.text)
+        );
         use std::io::Write;
         std::io::stdout().flush().ok();
     }

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::commands::common::{CommandStrategy, GlobalOptions};
 use crate::ui::{Layout, Renderable};
@@ -10,7 +9,7 @@ use mnem_core::env::get_base_dir;
 use mnem_core::protocol::SnapshotInfo;
 use mnem_core::protocol::methods;
 use mnem_core::storage::Repository;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Serialize)]
 pub struct HistoryResponse {
@@ -46,7 +45,7 @@ impl Renderable for HistoryResponse {
             Timeline::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
         timeline.page = self.page;
         timeline.limit = self.limit;
-        
+
         timeline.text()?;
 
         Ok(())
@@ -171,33 +170,33 @@ impl CommandStrategy for HistoryCommand {
 }
 
 impl HistoryCommand {
-    fn clear_history(&self, project_path: &PathBuf, json: bool) -> Result<()> {
+    fn clear_history(&self, project_path: &Path, json: bool) -> Result<()> {
         let mut success = false;
         let mut message = String::new();
 
-        if mnem_core::client::daemon_running() {
-            if let Ok(mut client) = DaemonClient::connect() {
-                let params = mnem_core::protocol::ClearHistoryParams {
-                    project_path: project_path.to_string_lossy().to_string(),
-                };
-                match client.call(
-                    methods::PROJECT_CLEAR_HISTORY,
-                    serde_json::to_value(params)?,
-                ) {
-                    Ok(res) => {
-                        let cleared = res
-                            .get("cleared_snapshots")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        success = true;
-                        message = format!(
-                            "Successfully cleared history ({} snapshots deleted)",
-                            cleared
-                        );
-                    }
-                    Err(e) => {
-                        message = format!("Failed to clear history: {}", e);
-                    }
+        if mnem_core::client::daemon_running()
+            && let Ok(mut client) = DaemonClient::connect()
+        {
+            let params = mnem_core::protocol::ClearHistoryParams {
+                project_path: project_path.to_string_lossy().to_string(),
+            };
+            match client.call(
+                methods::PROJECT_CLEAR_HISTORY,
+                serde_json::to_value(params)?,
+            ) {
+                Ok(res) => {
+                    let cleared = res
+                        .get("cleared_snapshots")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    success = true;
+                    message = format!(
+                        "Successfully cleared history ({} snapshots deleted)",
+                        cleared
+                    );
+                }
+                Err(e) => {
+                    message = format!("Failed to clear history: {}", e);
                 }
             }
         } else {
@@ -267,7 +266,7 @@ fn handle_timeline_view(file: Option<&str>, _layout: &Layout) -> Result<()> {
         cwd.clone(),
         file.map(|f| f.to_string()),
     );
-    
+
     timeline.text()?;
 
     Ok(())
@@ -277,7 +276,7 @@ fn try_daemon_file_history_data(
     f: &str,
     limit: usize,
     offset: usize,
-    project_path: &PathBuf,
+    project_path: &Path,
 ) -> Result<Vec<SnapshotInfo>> {
     let mut client = DaemonClient::connect()?;
     let full_path = if std::path::Path::new(f).is_absolute() {
@@ -302,7 +301,7 @@ fn handle_file_history_direct_data(
     f: &str,
     limit: usize,
     offset: usize,
-    project_path: &PathBuf,
+    project_path: &Path,
 ) -> Result<Vec<SnapshotInfo>> {
     let base_dir = get_base_dir()?;
     let full_path = if std::path::Path::new(f).is_absolute() {
@@ -311,7 +310,7 @@ fn handle_file_history_direct_data(
         project_path.join(f).to_string_lossy().to_string()
     };
 
-    let repo = Repository::open(base_dir, project_path.clone())?;
+    let repo = Repository::open(base_dir, project_path.to_path_buf())?;
 
     let history = repo.get_history(&full_path)?;
     let history = history
@@ -336,7 +335,7 @@ fn handle_file_history_direct_data(
 fn try_daemon_dashboard_view_data(
     limit: usize,
     offset: usize,
-    project_path: &PathBuf,
+    project_path: &Path,
 ) -> Result<Vec<SnapshotInfo>> {
     let mut client = DaemonClient::connect()?;
 
@@ -355,10 +354,10 @@ fn try_daemon_dashboard_view_data(
 fn handle_dashboard_view_direct_data(
     limit: usize,
     offset: usize,
-    project_path: &PathBuf,
+    project_path: &Path,
 ) -> Result<Vec<SnapshotInfo>> {
     let base_dir = get_base_dir()?;
-    let repo = Repository::open(base_dir, project_path.clone())?;
+    let repo = Repository::open(base_dir, project_path.to_path_buf())?;
     let history = repo.get_recent_activity(limit + offset)?;
     let history = history
         .into_iter()
