@@ -24,7 +24,14 @@ pub struct HistoryResponse {
 impl Renderable for HistoryResponse {
     fn text(&self) -> Result<()> {
         use crate::ui::components::timeline::Timeline;
+        use mnem_core::config::ConfigManager;
+        use std::collections::HashMap;
+        use std::fs;
+
         let cwd = std::env::current_dir()?;
+        let base_dir = get_base_dir()?;
+        let config = ConfigManager::new(&base_dir)?.config;
+        let ide = config.editor.ide;
 
         let title = if let Some(ref f) = self.file {
             format!("FILE HISTORY: {}", f)
@@ -40,9 +47,70 @@ impl Renderable for HistoryResponse {
             return Ok(());
         }
 
+        // Prepare temporary files for hyperlinks
+        let mut snapshot_links = HashMap::new();
+        let offset = (self.page - 1) * self.limit;
+        let paged_items = self.history.iter().skip(offset).take(self.limit);
+
+        // Create a temporary directory for snapshots if it doesn't exist
+        let temp_snapshots_dir = base_dir.join("snapshots");
+        if !temp_snapshots_dir.exists() {
+            let _ = fs::create_dir_all(&temp_snapshots_dir);
+        }
+
+        // Try to connect to daemon to get content, or use direct repo access
+        let mut client = DaemonClient::connect().ok();
+        let repo = if client.is_none() {
+            Repository::open(base_dir.clone(), cwd.clone()).ok()
+        } else {
+            None
+        };
+
+        for snap in paged_items {
+            let file_name = Path::new(&snap.file_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "file".to_string());
+
+            let temp_file_name = format!("{}_{}", &snap.content_hash[..8], file_name);
+            let temp_path = temp_snapshots_dir.join(temp_file_name);
+
+            let mut content_found = false;
+            if temp_path.exists() {
+                content_found = true;
+            } else {
+                // Try to get content from daemon
+                let content = if let Some(ref mut c) = client {
+                    match c.call(
+                        methods::SNAPSHOT_GET,
+                        serde_json::json!({ "content_hash": snap.content_hash }),
+                    ) {
+                        Ok(res) => res["content"].as_str().map(|s| s.as_bytes().to_vec()),
+                        Err(_) => None,
+                    }
+                } else if let Some(ref r) = repo {
+                    r.get_content(&snap.content_hash).ok().map(|b| b.to_vec())
+                } else {
+                    None
+                };
+
+                if let Some(bytes) = content {
+                    if fs::write(&temp_path, bytes).is_ok() {
+                        content_found = true;
+                    }
+                }
+            }
+
+            if content_found {
+                snapshot_links.insert(snap.content_hash.clone(), temp_path.to_string_lossy().to_string());
+            }
+        }
+
         // Use the Timeline component which handles grouping, connections and pagination
         let mut timeline =
-            Timeline::new(&title, self.history.clone(), cwd.clone(), self.file.clone());
+            Timeline::new(&title, self.history.clone(), cwd.clone(), self.file.clone())
+                .with_links(snapshot_links)
+                .with_ide(ide);
         timeline.page = self.page;
         timeline.limit = self.limit;
 
