@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use log::{info, error};
-use mnem_core::Repository;
 use crate::state::DaemonState;
+use log::{error, info};
+use mnem_core::Repository;
+use std::sync::Arc;
 
 pub async fn run_background_maintenance(state: Arc<DaemonState>) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600)); // Every hour
@@ -32,4 +32,3 @@ pub async fn run_background_maintenance(state: Arc<DaemonState>) {
         }
     }
 }
-

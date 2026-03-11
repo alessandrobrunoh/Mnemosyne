@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use mnem_core::{client::DaemonClient, protocol::methods};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -38,7 +38,6 @@ struct JsonRpcError {
 fn get_watched_paths(client: &mut DaemonClient) -> Result<Vec<String>> {
     let res = client.call(methods::PROJECT_LIST, json!({}))?;
     let projects = res["projects"].as_array().cloned().unwrap_or_default();
-
 
     Ok(projects
         .iter()
@@ -175,7 +174,7 @@ async fn handle_request(req: JsonRpcRequest) -> JsonRpcResponse {
                 id: Value::Null,
                 result: None,
                 error: None,
-            }
+            };
         }
         "tools/list" => Ok(tools_list()),
         "tools/call" => handle_tool_call(req.params).await,
@@ -375,7 +374,10 @@ async fn handle_tool_call(params: Value) -> Result<Value> {
             let symbol = args["symbol_name"]
                 .as_str()
                 .context("symbol_name required")?;
-            let res = client.call(methods::SYMBOL_GET_HISTORY, json!({ "symbol_name": symbol }))?;
+            let res = client.call(
+                methods::SYMBOL_GET_HISTORY,
+                json!({ "symbol_name": symbol }),
+            )?;
             Ok(mcp_text(&serde_json::to_string_pretty(&res)?))
         }
 
@@ -443,7 +445,6 @@ async fn handle_tool_call(params: Value) -> Result<Value> {
             )?;
             Ok(mcp_text(&serde_json::to_string_pretty(&res)?))
         }
-
 
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }

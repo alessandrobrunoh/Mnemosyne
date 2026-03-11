@@ -63,7 +63,7 @@ fn validate_pid_range(pid: u32) -> AppResult<i32> {
 #[cfg(unix)]
 mod unix {
     use super::*;
-    use libc::{kill, ESRCH};
+    use libc::{ESRCH, kill};
 
     /// Unix implementation using kill() with signal 0.
     /// Signal 0 is a special signal that performs error checking but doesn't actually send a signal.

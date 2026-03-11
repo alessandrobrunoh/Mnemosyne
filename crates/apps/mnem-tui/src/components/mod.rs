@@ -8,4 +8,3 @@ pub mod shared;
 pub mod sidebar;
 pub mod stats;
 pub mod status_bar;
-

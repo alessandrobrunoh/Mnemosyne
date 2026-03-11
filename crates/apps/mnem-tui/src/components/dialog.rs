@@ -1,11 +1,11 @@
 use crate::app::{AppState, DialogType};
 use crate::components::shared::ZedBlock;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Clear, List, ListItem, Paragraph},
-    Frame,
 };
 
 pub fn render(f: &mut Frame, state: &mut AppState) {
