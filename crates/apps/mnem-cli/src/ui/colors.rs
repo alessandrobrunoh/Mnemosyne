@@ -70,6 +70,11 @@ pub const MINT: Color = Color::Rgb {
     g: 250,
     b: 203,
 }; // #50FACB
+pub const AI_PURPLE: Color = Color::Rgb {
+    r: 160,
+    g: 32,
+    b: 240,
+}; // #A020F0
 pub const COMMENT: Color = Color::Rgb {
     r: 98,
     g: 114,

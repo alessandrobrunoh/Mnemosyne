@@ -13,6 +13,11 @@ NC='\033[0m' # No Color
 INSTALL_DIR="$HOME/.mnemosyne"
 BIN_DIR="$INSTALL_DIR/bin"
 
+PURGE=false
+if [ "$1" == "--purge" ]; then
+    PURGE=true
+fi
+
 echo -e "${RED}--- Mnemosyne Uninstallation ---${NC}"
 
 # 1. Stop processes
@@ -22,12 +27,22 @@ pkill -9 mnem-daemon 2>/dev/null || true
 sleep 1
 
 # 2. Remove files
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${BLUE}[*] Removing $INSTALL_DIR...${NC}"
-    rm -rf "$INSTALL_DIR"
-    echo -e "${GREEN}✓ Removed files.${NC}"
+if [ "$PURGE" = true ]; then
+    if [ -d "$INSTALL_DIR" ]; then
+        echo -e "${BLUE}[*] Purging everything in $INSTALL_DIR...${NC}"
+        rm -rf "$INSTALL_DIR"
+        echo -e "${GREEN}✓ Removed all files and configuration.${NC}"
+    else
+        echo -e "${YELLOW}[!] $INSTALL_DIR not found.${NC}"
+    fi
 else
-    echo -e "${YELLOW}[!] $INSTALL_DIR not found.${NC}"
+    if [ -d "$BIN_DIR" ]; then
+        echo -e "${BLUE}[*] Removing binaries in $BIN_DIR...${NC}"
+        rm -rf "$BIN_DIR"
+        echo -e "${GREEN}✓ Removed binaries. Configuration and history preserved in $INSTALL_DIR.${NC}"
+    else
+        echo -e "${YELLOW}[!] $BIN_DIR not found.${NC}"
+    fi
 fi
 
 # 3. Clean up PATH (optional, but good practice)
@@ -41,11 +56,9 @@ esac
 if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
     if grep -q "Mnemosyne bin" "$CONFIG_FILE"; then
         echo -e "${BLUE}[*] Cleaning up $CONFIG_FILE...${NC}"
-        # Remove the lines added by the installer
-        # This is a bit tricky with sed, we'll just advise the user or do a simple removal
-        sed -i.bak '/# Mnemosyne bin/d' "$CONFIG_FILE"
-        sed -i.bak '/export PATH="\$PATH:'"$(echo $BIN_DIR | sed 's/\//\//g')"'"/d' "$CONFIG_FILE"
-        rm -f "${CONFIG_FILE}.bak"
+        # Remove the 3 lines added by the installer: blank line, comment, export
+        sed -i '' '/# Mnemosyne bin/{N;d;}' "$CONFIG_FILE"
+        sed -i '' '/export PATH=.*\.mnemosyne\/bin/d' "$CONFIG_FILE"
         echo -e "${GREEN}✓ Cleaned up $CONFIG_FILE.${NC}"
     fi
 fi

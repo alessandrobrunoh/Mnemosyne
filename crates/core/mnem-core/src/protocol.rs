@@ -295,6 +295,7 @@ pub mod methods {
     pub const PROJECT_CREATE_CHECKPOINT: &str = "mnem/project/checkpoint";
     pub const PROJECT_REVERT_V1: &str = "mnem/project/revert";
     pub const PROJECT_RELOAD: &str = "mnem/project/reload";
+    pub const PROJECT_CLEAR_HISTORY: &str = "mnem/project/clear_history";
     pub const MAINTENANCE_GC: &str = "mnem/maintenance/gc";
     pub const CONFIG_GET_V1: &str = "mnem/config/get";
     pub const CONFIG_SET_V1: &str = "mnem/config/set";
@@ -353,6 +354,11 @@ pub fn normalize_method_name(method: &str) -> &str {
 // ---------------------------------------------------------------------------
 // Typed request/response params
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClearHistoryParams {
+    pub project_path: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WatchParams {
@@ -421,7 +427,7 @@ pub struct SymbolHistoryEntry {
     pub end_line: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolLocation {
     pub name: String,
     pub kind: String,
@@ -565,7 +571,7 @@ pub struct TierConfigGetResponse {
 
 // Responses
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub version: String,
     pub uptime_secs: u64,
@@ -586,7 +592,7 @@ pub struct StatusResponse {
     pub total_symbols: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotInfo {
     pub id: i64,
     pub file_path: String,
@@ -595,6 +601,7 @@ pub struct SnapshotInfo {
     pub git_branch: Option<String>,
     pub commit_hash: Option<String>,
     pub commit_message: Option<String>,
+    pub checkpoint_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

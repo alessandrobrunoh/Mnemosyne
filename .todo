@@ -1,0 +1,4 @@
+- [ ] rimuovere Initial State in mnem r ...
+- [ ] migliorare i config
+- [ ] Cambiare nome di SCommand a SearchCommand
+- [ ] creare una macro Presentable (magari dargli anche un nome migliore)

@@ -1450,7 +1450,7 @@ dependencies = [
 
 [[package]]
 name = "mnem-cli"
-version = "0.1.11"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "mnem-daemon"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",

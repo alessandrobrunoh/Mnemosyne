@@ -13,6 +13,7 @@ pub struct Snapshot {
     pub session_id: Option<i64>,
     pub commit_hash: Option<String>,
     pub commit_message: Option<String>,
+    pub checkpoint_name: Option<String>,
 }
 
 pub struct FileEntry {
@@ -75,11 +76,10 @@ impl FileNode {
     }
 
     fn insert_recursive(&mut self, parts: &[&str], current_path: &str) {
-        if parts.is_empty() {
+        let Some(name) = parts.first() else {
             return;
-        }
+        };
 
-        let name = parts.first().expect("parts is not empty after check");
         let new_path = if current_path.is_empty() {
             name.to_string()
         } else {

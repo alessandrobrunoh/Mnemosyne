@@ -148,7 +148,7 @@ pub fn render_timeline(f: &mut Frame, area: Rect, state: &mut AppState) {
                     };
 
                     let is_base = state.diff_base_hash.as_ref() == Some(&s.content_hash);
-                    let is_last_in_session = state.history_items.get(i + 1).map_or(true, |next| {
+                    let is_last_in_session = state.history_items.get(i + 1).is_none_or(|next| {
                         matches!(next, HistoryItem::Session(_) | HistoryItem::DateHeader(_))
                     });
 

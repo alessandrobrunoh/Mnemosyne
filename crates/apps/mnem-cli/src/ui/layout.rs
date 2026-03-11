@@ -1,7 +1,6 @@
 use crate::theme::Theme;
-use crate::ui_components::elements::Hyperlink;
+use crate::ui::components::elements::Hyperlink;
 use crossterm::style::Stylize;
-use mnem_macros::UiDebug;
 
 pub struct LayoutBuilder {
     theme: Option<Theme>,
@@ -64,7 +63,7 @@ impl LayoutBuilder {
     }
 }
 
-#[derive(Debug, Clone, UiDebug)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     theme: Theme,
     padding: usize,
@@ -482,9 +481,17 @@ impl Layout {
             if !legend.is_empty() {
                 legend.push_str("   ");
             }
+            let icon_styled = if *icon == "●" && desc.to_lowercase().contains("latest") {
+                icon.with(self.theme.success_bright).bold().to_string()
+            } else if *icon == "●" {
+                icon.with(self.theme.text_dim).bold().to_string()
+            } else {
+                icon.with(self.theme.secondary).bold().to_string()
+            };
+
             legend.push_str(&format!(
                 "{} {}",
-                icon.with(self.theme.text_bright).bold(),
+                icon_styled,
                 desc.with(self.theme.text_dim)
             ));
         }
@@ -744,5 +751,104 @@ impl Layout {
             "│".with(self.theme.timeline_cyan),
             link.with(self.theme.accent)
         );
+    }
+
+    // --- Butler-style Graph Primitives ---
+
+    pub fn graph_branch_start(&self, name: &str) {
+        println!(
+            "{}┄{} [{}]",
+            "  ╭".with(self.theme.text_bright),
+            "zz".with(self.theme.secondary).bold(),
+            name.with(self.theme.text_bright).bold()
+        );
+    }
+
+    pub fn graph_block_header(&self, icon: &str, title: &str, color: crossterm::style::Color) {
+        println!(
+            "{} {} {}",
+            "  ┊".with(self.theme.text_bright),
+            icon.with(color).bold(),
+            title.with(color).bold()
+        );
+    }
+
+    pub fn graph_node(
+        &self,
+        hash: &str,
+        meta: &str,
+        is_latest: bool,
+        time: &str,
+        icon: Option<&str>,
+        color: crossterm::style::Color,
+    ) {
+        let dot = if is_latest {
+            "●".with(self.theme.success_bright)
+        } else {
+            "●".with(self.theme.text_dim)
+        };
+
+        let icon_str = if let Some(i) = icon {
+            format!("{: <2} ", i.with(color).bold())
+        } else {
+            String::new()
+        };
+
+        println!(
+            "{} {} {: <8} {: <40} {}",
+            "  ┊".with(self.theme.text_bright),
+            dot,
+            hash.with(self.theme.timeline_cyan).bold(),
+            format!("{}{}", icon_str, meta.with(self.theme.text)),
+            time.with(self.theme.text_dim).italic()
+        );
+    }
+
+    pub fn graph_file_change(&self, file_path: &str, action: &str) {
+        let act_color = match action {
+            "A" | "add" => self.theme.success,
+            "M" | "modify" => self.theme.timeline_yellow,
+            "D" | "delete" => self.theme.error,
+            _ => self.theme.text_dim,
+        };
+
+        println!(
+            "{}    {} {}",
+            "  ┊".with(self.theme.text_bright),
+            action.with(act_color).bold(),
+            file_path.with(self.theme.text_dim)
+        );
+    }
+
+    pub fn graph_connector(&self) {
+        println!("{}│", "  ┊".with(self.theme.text_bright));
+    }
+
+    pub fn graph_branch_connector(&self, name: &str) {
+        println!(
+            "{}┄{} [{}]",
+            "  ├".with(self.theme.text_bright),
+            "ch".with(self.theme.secondary).bold(),
+            name.with(self.theme.text_bright).bold()
+        );
+    }
+
+    pub fn graph_branch_end(&self) {
+        println!("{}╯", "  ├".with(self.theme.text_bright));
+    }
+
+    pub fn graph_root(&self, hash: &str, meta: &str, time: &str) {
+        println!(
+            "{} {} {: <8} {} {}",
+            "  ┴".with(self.theme.text_bright),
+            "●".with(self.theme.text_dim),
+            hash.with(self.theme.timeline_cyan).bold(),
+            meta.with(self.theme.text_bright),
+            time.with(self.theme.text_dim).italic()
+        );
+    }
+
+    pub fn graph_empty_line(&self) {
+        println!("{}", "  ┊".with(self.theme.text_bright));
     }
 }

@@ -12,10 +12,10 @@ pub fn is_on_battery() -> bool {
 
     // Fallback: check sysfs on Linux
     let battery_path = Path::new("/sys/class/power_supply/BAT0/status");
-    if battery_path.exists() {
-        if let Ok(status) = std::fs::read_to_string(battery_path) {
-            return status.trim() == "Discharging";
-        }
+    if battery_path.exists()
+        && let Ok(status) = std::fs::read_to_string(battery_path)
+    {
+        return status.trim() == "Discharging";
     }
 
     false
@@ -29,7 +29,7 @@ pub fn battery_level() -> Option<u8> {
         // Parse "XX%" from pmset output
         for word in stdout.split_whitespace() {
             if word.ends_with("%;") || word.ends_with('%') {
-                let num_str = word.trim_end_matches(|c| c == '%' || c == ';');
+                let num_str = word.trim_end_matches(['%', ';']);
                 if let Ok(level) = num_str.parse::<u8>() {
                     return Some(level);
                 }
@@ -39,12 +39,11 @@ pub fn battery_level() -> Option<u8> {
 
     // Linux fallback
     let capacity_path = Path::new("/sys/class/power_supply/BAT0/capacity");
-    if capacity_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(capacity_path) {
-            if let Ok(level) = content.trim().parse::<u8>() {
-                return Some(level);
-            }
-        }
+    if capacity_path.exists()
+        && let Ok(content) = std::fs::read_to_string(capacity_path)
+        && let Ok(level) = content.trim().parse::<u8>()
+    {
+        return Some(level);
     }
 
     None
@@ -70,7 +69,7 @@ impl PowerProfile {
         let level = battery_level();
 
         if on_battery {
-            let critical = level.map_or(false, |l| l < 20);
+            let critical = level.is_some_and(|l| l < 20);
 
             if critical {
                 // Critical battery: minimum activity

@@ -1,18 +1,14 @@
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default, Eq)]
 pub enum Ide {
+    #[default]
     Zed,
     ZedPreview,
     VsCode,
-}
-
-impl Default for Ide {
-    fn default() -> Self {
-        Self::Zed
-    }
 }
 
 impl Ide {
@@ -20,68 +16,178 @@ impl Ide {
         match self {
             Self::Zed => "Zed",
             Self::ZedPreview => "Zed Preview",
-            Self::VsCode => "Visual Studio Code",
-        }
-    }
-
-    pub fn command_name(&self) -> &'static str {
-        match self {
-            Self::Zed => "Zed",
-            Self::ZedPreview => "Zed Preview",
-            Self::VsCode => "Visual Studio Code",
+            Self::VsCode => "VsCode",
         }
     }
 }
 
+impl FromStr for Ide {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "zed" => Ok(Self::Zed),
+            "zed-preview" | "zedpreview" => Ok(Self::ZedPreview),
+            "vscode" | "vs-code" => Ok(Self::VsCode),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Ide {
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        Ide::from_str(s).ok()
+    }
+}
+
+/// Storage configuration - manages retention and disk usage
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Config {
+pub struct StorageConfig {
+    #[serde(default = "default_retention_days")]
     pub retention_days: u64,
+    #[serde(default = "default_true")]
     pub compression_enabled: bool,
+    #[serde(default = "default_true")]
     pub use_mnemosyneignore: bool,
-    pub theme_index: usize,
-    #[serde(default = "default_max_file_size_mb")]
+    #[serde(default = "default_max_file_size")]
     pub max_file_size_mb: u64,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            retention_days: default_retention_days(),
+            compression_enabled: true,
+            use_mnemosyneignore: true,
+            max_file_size_mb: default_max_file_size(),
+        }
+    }
+}
+
+/// UI configuration - manages visual settings and themes
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub theme_index: usize,
+}
+
+/// Editor configuration - manages IDE integration
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct EditorConfig {
     #[serde(default)]
     pub ide: Ide,
 }
 
-fn default_max_file_size_mb() -> u64 {
+// ========== DEFAULT VALUES ==========
+
+fn default_retention_days() -> u64 {
+    30
+}
+fn default_true() -> bool {
+    true
+}
+fn default_max_file_size() -> u64 {
     10
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            retention_days: 30,
-            compression_enabled: true,
-            use_mnemosyneignore: true,
-            theme_index: 0,
-            max_file_size_mb: default_max_file_size_mb(),
-            ide: Ide::default(),
+// ========== MAIN CONFIG STRUCTURE ==========
+
+/// Main configuration with categorized sections
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct Config {
+    #[serde(default)]
+    pub storage: StorageConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
+    #[serde(default)]
+    pub editor: EditorConfig,
+}
+
+// ========== LEGACY CONFIG STRUCTURE (for migration) ==========
+
+/// Legacy flat configuration structure (for migration)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct LegacyConfig {
+    #[serde(default)]
+    retention_days: Option<u64>,
+    #[serde(default)]
+    compression_enabled: Option<bool>,
+    #[serde(default)]
+    use_mnemosyneignore: Option<bool>,
+    #[serde(default)]
+    theme_index: Option<usize>,
+    #[serde(default)]
+    max_file_size_mb: Option<u64>,
+    #[serde(default)]
+    ide: Option<String>,
+}
+
+impl From<LegacyConfig> for Config {
+    fn from(legacy: LegacyConfig) -> Self {
+        let mut config = Config::default();
+
+        if let Some(val) = legacy.retention_days {
+            config.storage.retention_days = val;
         }
+        if let Some(val) = legacy.compression_enabled {
+            config.storage.compression_enabled = val;
+        }
+        if let Some(val) = legacy.use_mnemosyneignore {
+            config.storage.use_mnemosyneignore = val;
+        }
+        if let Some(val) = legacy.max_file_size_mb {
+            config.storage.max_file_size_mb = val;
+        }
+        if let Some(val) = legacy.theme_index {
+            config.ui.theme_index = val;
+        }
+        if let Some(ref val) = legacy.ide
+            && let Some(ide) = Ide::from_str_opt(val)
+        {
+            config.editor.ide = ide;
+        }
+
+        config
     }
 }
 
+// ========== CONFIG MANAGER ==========
+
 pub struct ConfigManager {
-    config_path: PathBuf,
+    pub config_path: PathBuf,
     pub config: Config,
 }
 
 impl ConfigManager {
     pub fn new(base_dir: &std::path::Path) -> AppResult<Self> {
         let config_path = base_dir.join("config.toml");
-        let config = if config_path.exists() {
-            let content = std::fs::read_to_string(&config_path).map_err(AppError::IoGeneric)?;
-            toml::from_str(&content).unwrap_or_default()
+
+        let config: Config = if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+
+            // Try to detect if it's legacy flat structure first
+            if content.contains("retention_days =") && !content.contains("[storage]") {
+                if let Ok(legacy) = toml::from_str::<LegacyConfig>(&content) {
+                    let new_config: Config = legacy.into();
+                    if let Err(e) = Self::save_to_path(&new_config, &config_path) {
+                        eprintln!("Warning: failed to save migrated config: {}", e);
+                    }
+                    new_config
+                } else {
+                    Config::default()
+                }
+            } else {
+                toml::from_str(&content).unwrap_or_default()
+            }
         } else {
             Config::default()
         };
 
         // Auto-save default if missing
-        if !config_path.exists() {
-            if let Err(e) = Self::save_to_path(&config, &config_path) {
-                eprintln!("Warning: failed to save default config: {}", e);
-            }
+        if !config_path.exists()
+            && let Err(e) = Self::save_to_path(&config, &config_path)
+        {
+            eprintln!("Warning: failed to save default config: {}", e);
         }
 
         // Create default global .mnemignore if missing
@@ -154,16 +260,59 @@ Gemfile.lock
         std::fs::write(temp.path(), &content).map_err(AppError::IoGeneric)?;
         temp.persist(path)
             .map_err(|e| AppError::IoGeneric(e.error))?;
+
         Ok(())
     }
 
-    pub fn update_retention(&mut self, days: u64) -> AppResult<()> {
-        self.config.retention_days = days;
-        self.save()
+    pub fn get_value(&self, key: &str) -> Option<String> {
+        match key {
+            "storage.retention_days" => Some(self.config.storage.retention_days.to_string()),
+            "storage.compression_enabled" => {
+                Some(self.config.storage.compression_enabled.to_string())
+            }
+            "storage.use_mnemosyneignore" => {
+                Some(self.config.storage.use_mnemosyneignore.to_string())
+            }
+            "storage.max_file_size_mb" => Some(self.config.storage.max_file_size_mb.to_string()),
+            "ui.theme_index" => Some(self.config.ui.theme_index.to_string()),
+            "editor.ide" => Some(self.config.editor.ide.as_str().to_string()),
+            _ => None,
+        }
     }
 
-    pub fn toggle_compression(&mut self) -> AppResult<()> {
-        self.config.compression_enabled = !self.config.compression_enabled;
+    pub fn set_value(&mut self, key: &str, value: &str) -> AppResult<()> {
+        match key {
+            "storage.retention_days" => {
+                self.config.storage.retention_days = value
+                    .parse::<u64>()
+                    .map_err(|e| AppError::Config(e.to_string()))?;
+            }
+            "storage.compression_enabled" => {
+                self.config.storage.compression_enabled = value
+                    .parse::<bool>()
+                    .map_err(|e| AppError::Config(e.to_string()))?;
+            }
+            "storage.use_mnemosyneignore" => {
+                self.config.storage.use_mnemosyneignore = value
+                    .parse::<bool>()
+                    .map_err(|e| AppError::Config(e.to_string()))?;
+            }
+            "storage.max_file_size_mb" => {
+                self.config.storage.max_file_size_mb = value
+                    .parse::<u64>()
+                    .map_err(|e| AppError::Config(e.to_string()))?;
+            }
+            "ui.theme_index" => {
+                self.config.ui.theme_index = value
+                    .parse::<usize>()
+                    .map_err(|e| AppError::Config(e.to_string()))?;
+            }
+            "editor.ide" => {
+                self.config.editor.ide = Ide::from_str_opt(value)
+                    .ok_or_else(|| AppError::Config("Invalid IDE".into()))?;
+            }
+            _ => return Err(AppError::Config(format!("Unknown config key: {}", key))),
+        }
         self.save()
     }
 }
@@ -177,8 +326,9 @@ mod tests {
     fn default_config_created_when_missing() {
         let dir = TempDir::new().unwrap();
         let config_manager = ConfigManager::new(dir.path()).unwrap();
-        assert_eq!(config_manager.config.retention_days, 30);
+
         assert!(dir.path().join("config.toml").exists());
+        assert_eq!(config_manager.config.storage.retention_days, 30);
     }
 
     #[test]
@@ -186,18 +336,88 @@ mod tests {
         let dir = TempDir::new().unwrap();
         {
             let mut config_manager = ConfigManager::new(dir.path()).unwrap();
-            config_manager.update_retention(7).unwrap();
+            config_manager.config.storage.retention_days = 45;
+            config_manager.save().unwrap();
         }
+
         let config_manager = ConfigManager::new(dir.path()).unwrap();
-        assert_eq!(config_manager.config.retention_days, 7);
+        assert_eq!(config_manager.config.storage.retention_days, 45);
     }
 
     #[test]
     fn test_toggle_compression() {
         let dir = TempDir::new().unwrap();
         let mut config_manager = ConfigManager::new(dir.path()).unwrap();
-        let initial = config_manager.config.compression_enabled;
-        config_manager.toggle_compression().unwrap();
-        assert_eq!(config_manager.config.compression_enabled, !initial);
+
+        config_manager.config.storage.compression_enabled = false;
+        config_manager.save().unwrap();
+
+        let config_manager2 = ConfigManager::new(dir.path()).unwrap();
+        assert!(!config_manager2.config.storage.compression_enabled);
+    }
+
+    #[test]
+    fn test_get_value_nested_keys() {
+        let dir = TempDir::new().unwrap();
+        let config_manager = ConfigManager::new(dir.path()).unwrap();
+
+        assert_eq!(
+            config_manager.get_value("storage.retention_days").unwrap(),
+            "30"
+        );
+        assert_eq!(
+            config_manager
+                .get_value("storage.compression_enabled")
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(config_manager.get_value("ui.theme_index").unwrap(), "0");
+        assert_eq!(config_manager.get_value("editor.ide").unwrap(), "Zed");
+    }
+
+    #[test]
+    fn test_set_value_nested_keys() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mut config_manager = ConfigManager::new(dir.path()).unwrap();
+            config_manager
+                .set_value("storage.retention_days", "60")
+                .unwrap();
+            config_manager
+                .set_value("storage.compression_enabled", "false")
+                .unwrap();
+            config_manager.set_value("editor.ide", "VsCode").unwrap();
+        }
+
+        let config_manager = ConfigManager::new(dir.path()).unwrap();
+        assert_eq!(config_manager.config.storage.retention_days, 60);
+        assert!(!config_manager.config.storage.compression_enabled);
+        assert_eq!(config_manager.config.editor.ide, Ide::VsCode);
+    }
+
+    #[test]
+    fn test_legacy_migration() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // Write legacy config
+        let legacy_content = r#"
+retention_days = 15
+compression_enabled = false
+use_mnemosyneignore = true
+theme_index = 2
+max_file_size_mb = 20
+ide = "VsCode"
+"#;
+        std::fs::write(&config_path, legacy_content).unwrap();
+
+        // Load and migrate
+        let config_manager = ConfigManager::new(dir.path()).unwrap();
+
+        // Verify migration
+        assert_eq!(config_manager.config.storage.retention_days, 15);
+        assert!(!config_manager.config.storage.compression_enabled);
+        assert_eq!(config_manager.config.ui.theme_index, 2);
+        assert_eq!(config_manager.config.editor.ide, Ide::VsCode);
     }
 }
