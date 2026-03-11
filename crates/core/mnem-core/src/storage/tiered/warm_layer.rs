@@ -22,14 +22,12 @@ impl WarmLayer {
 
         for entry in fs::read_dir(&self.root).map_err(AppError::IoGeneric)? {
             let entry = entry.map_err(AppError::IoGeneric)?;
-            if let Ok(meta) = entry.metadata() {
-                if let Ok(modified) = meta.modified() {
-                    if let Ok(age) = SystemTime::now().duration_since(modified) {
-                        if let Ok(name) = entry.file_name().into_string() {
-                            results.push((name, age));
-                        }
-                    }
-                }
+            if let Ok(meta) = entry.metadata()
+                && let Ok(modified) = meta.modified()
+                && let Ok(age) = SystemTime::now().duration_since(modified)
+                && let Ok(name) = entry.file_name().into_string()
+            {
+                results.push((name, age));
             }
         }
         Ok(results)
@@ -45,13 +43,13 @@ impl StorageLayer for WarmLayer {
         fs::write(path, compressed).map_err(AppError::IoGeneric)
     }
 
-    fn read(&self, hash: &str) -> AppResult<Option<Vec<u8>>> {
+    fn read(&self, hash: &str) -> AppResult<Option<bytes::Bytes>> {
         let path = self.root.join(hash);
         if path.exists() {
             let compressed = fs::read(path).map_err(AppError::IoGeneric)?;
             let decompressed = zstd::decode_all(&compressed[..])
                 .map_err(|e| AppError::Internal(format!("Zstd warm decompress error: {}", e)))?;
-            Ok(Some(decompressed))
+            Ok(Some(bytes::Bytes::from(decompressed)))
         } else {
             Ok(None)
         }

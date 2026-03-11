@@ -22,6 +22,8 @@ const STRINGS: TableDefinition<u32, &str> = TableDefinition::new("strings");
 const STRING_INDEX: TableDefinition<&str, u32> = TableDefinition::new("string_index");
 const CHUNK_TRIGRAMS: TableDefinition<&str, u64> = TableDefinition::new("chunk_trigrams");
 
+pub type CommitInfo = (String, String, String, String, usize);
+
 #[derive(Serialize, Deserialize, Clone)]
 struct SnapshotData {
     id: i64,
@@ -33,6 +35,8 @@ struct SnapshotData {
     commit_hash: Option<String>,
     #[serde(default)]
     commit_message: Option<String>,
+    #[serde(default)]
+    pub checkpoint_name: Option<String>,
 }
 
 /// Helper function to safely deserialize SnapshotData, skipping old format or corrupted records
@@ -432,6 +436,7 @@ impl Database {
                 session_id,
                 commit_hash: None,
                 commit_message: None,
+                checkpoint_name: None,
             };
             let bytes = bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
             table
@@ -520,6 +525,7 @@ impl Database {
                     session_id: data.session_id,
                     commit_hash: data.commit_hash,
                     commit_message: data.commit_message,
+                    checkpoint_name: data.checkpoint_name,
                 });
             }
         }
@@ -562,6 +568,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             });
         }
         history.sort_by(|a, b| b.id.cmp(&a.id));
@@ -601,6 +608,7 @@ impl Database {
                     session_id: data.session_id,
                     commit_hash: data.commit_hash,
                     commit_message: data.commit_message,
+                    checkpoint_name: data.checkpoint_name,
                 });
             }
         }
@@ -658,16 +666,16 @@ impl Database {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
             let data: SnapshotData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            if let Some(bid) = branch_id {
-                if data.git_branch_id != Some(bid) {
-                    continue;
-                }
+            if let Some(bid) = branch_id
+                && data.git_branch_id != Some(bid)
+            {
+                continue;
             }
             let path = self.lookup_string(data.file_path_id)?;
-            if let Some(f) = filter {
-                if !path.contains(f) {
-                    continue;
-                }
+            if let Some(f) = filter
+                && !path.contains(f)
+            {
+                continue;
             }
             let entry = files
                 .entry(data.file_path_id)
@@ -792,6 +800,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             });
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -839,6 +848,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             });
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -1045,6 +1055,7 @@ impl Database {
                 session_id: data.session_id,
                 commit_hash: data.commit_hash,
                 commit_message: data.commit_message,
+                checkpoint_name: data.checkpoint_name,
             }))
         } else {
             Ok(None)
@@ -1539,52 +1550,52 @@ impl Database {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
             let sym_data: SymbolData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            if sym_data.structural_hash == latest_hash || sym_data.name_id == target_id {
-                if let Some(sv) = snap_table
+            if (sym_data.structural_hash == latest_hash || sym_data.name_id == target_id)
+                && let Some(sv) = snap_table
                     .get(sym_data.snapshot_id as u64)
                     .map_err(|e| AppError::Database(e.to_string()))?
-                {
-                    let snap_data: SnapshotData = bincode::deserialize(sv.value())
-                        .map_err(|e| AppError::Internal(e.to_string()))?;
-                    let path = self.lookup_string(snap_data.file_path_id)?;
-                    let branch = if let Some(bid) = snap_data.git_branch_id {
-                        Some(self.lookup_string(bid)?)
-                    } else {
-                        None
-                    };
-                    let snap = Snapshot {
-                        id: snap_data.id,
-                        file_path: path,
-                        timestamp: snap_data.timestamp,
-                        content_hash: snap_data.content_hash,
-                        git_branch: branch,
-                        session_id: snap_data.session_id,
-                        commit_hash: snap_data.commit_hash,
-                        commit_message: snap_data.commit_message,
-                    };
-                    let name = self.lookup_string(sym_data.name_id)?;
-                    let kind = self.lookup_string(sym_data.kind_id)?;
-                    let scope = if let Some(sid) = sym_data.scope_id {
-                        Some(self.lookup_string(sid)?)
-                    } else {
-                        None
-                    };
-                    let sym = SemanticSymbol {
-                        id: sym_data.id,
-                        name,
-                        kind,
-                        scope,
-                        snapshot_id: sym_data.snapshot_id,
-                        chunk_hash: sym_data.chunk_hash,
-                        structural_hash: sym_data.structural_hash,
-                        start_line: sym_data.start_line,
-                        end_line: sym_data.end_line,
-                        start_byte: sym_data.start_byte,
-                        end_byte: sym_data.end_byte,
-                        parent_id: sym_data.parent_id,
-                    };
-                    results.push((snap, sym));
-                }
+            {
+                let snap_data: SnapshotData = bincode::deserialize(sv.value())
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                let path = self.lookup_string(snap_data.file_path_id)?;
+                let branch = if let Some(bid) = snap_data.git_branch_id {
+                    Some(self.lookup_string(bid)?)
+                } else {
+                    None
+                };
+                let snap = Snapshot {
+                    id: snap_data.id,
+                    file_path: path,
+                    timestamp: snap_data.timestamp,
+                    content_hash: snap_data.content_hash,
+                    git_branch: branch,
+                    session_id: snap_data.session_id,
+                    commit_hash: snap_data.commit_hash,
+                    commit_message: snap_data.commit_message,
+                    checkpoint_name: snap_data.checkpoint_name,
+                };
+                let name = self.lookup_string(sym_data.name_id)?;
+                let kind = self.lookup_string(sym_data.kind_id)?;
+                let scope = if let Some(sid) = sym_data.scope_id {
+                    Some(self.lookup_string(sid)?)
+                } else {
+                    None
+                };
+                let sym = SemanticSymbol {
+                    id: sym_data.id,
+                    name,
+                    kind,
+                    scope,
+                    snapshot_id: sym_data.snapshot_id,
+                    chunk_hash: sym_data.chunk_hash,
+                    structural_hash: sym_data.structural_hash,
+                    start_line: sym_data.start_line,
+                    end_line: sym_data.end_line,
+                    start_byte: sym_data.start_byte,
+                    end_byte: sym_data.end_byte,
+                    parent_id: sym_data.parent_id,
+                };
+                results.push((snap, sym));
             }
         }
         results.sort_by(|a, b| b.0.timestamp.cmp(&a.0.timestamp));
@@ -1842,7 +1853,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_commits(&self) -> AppResult<Vec<(String, String, String, String, usize)>> {
+    pub fn get_commits(&self) -> AppResult<Vec<CommitInfo>> {
         let read_txn = self
             .db
             .begin_read()

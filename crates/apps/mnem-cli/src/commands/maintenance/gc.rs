@@ -1,45 +1,89 @@
-use crate::commands::Command;
-use crate::ui::Layout;
 use anyhow::Result;
-use crossterm::style::Stylize;
-use mnem_core::{Repository, client::DaemonClient, protocol::methods};
+use clap::Args;
 
-#[derive(Debug)]
-pub struct GcCommand;
+use crate::commands::common::{CommandStrategy, GlobalOptions};
+use crate::ui::Layout;
+use crate::ui::Renderable;
+use crate::ui::presentable::SimpleResponse;
 
-impl Command for GcCommand {
-    fn name(&self) -> &str {
-        "gc"
-    }
+/// Garbage collection for orphan chunks
+#[derive(Args, Clone, Debug)]
+pub struct GcCommand {
+    /// Number of days to keep chunks (default: 30)
+    #[arg(short, long)]
+    pub keep: Option<usize>,
 
-    fn usage(&self) -> &str {
-        ""
-    }
+    /// Perform a dry run without making changes
+    #[arg(short, long)]
+    pub dry_run: bool,
 
-    fn description(&self) -> &str {
-        "Prune old snapshots and optimize storage"
-    }
+    /// Perform aggressive garbage collection (removes more)
+    #[arg(short, long)]
+    pub aggressive: bool,
+}
 
-    fn group(&self) -> &str {
-        "Maintenance"
-    }
+impl CommandStrategy for GcCommand {
+    fn execute(&self, global_opts: &GlobalOptions) -> Result<()> {
+        use crossterm::style::Stylize;
+        use mnem_core::{client::DaemonClient, protocol::methods};
 
-    fn execute(&self, _args: &[String]) -> Result<()> {
         let layout = Layout::new();
-        layout.section_start("gc", "Garbage Collection");
 
-        if let Ok(mut client) = DaemonClient::connect() {
-            let res = client.call(methods::MAINTENANCE_GC, serde_json::json!({}))?;
-            let pruned = res["pruned"].to_string();
-            layout.item_simple(&format!(
-                "{} Successfully pruned {} orphan chunks.",
-                "√".green(),
-                pruned.bold()
-            ));
-        } else {
-            layout.error("Daemon is NOT running. Please start it with 'mnem on'");
+        if self.dry_run {
+            if global_opts.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "success": true, "dry_run": true, "message": "Dry run - no changes made" })
+                );
+            } else {
+                layout.section_start("gc", "Garbage Collection");
+                layout.item_simple("Dry run - no changes will be made");
+                layout.section_end();
+            }
+            return Ok(());
         }
-        layout.section_end();
+
+        let response = match DaemonClient::connect() {
+            Ok(mut client) => {
+                let params = serde_json::json!({
+                    "keep_days": self.keep,
+                });
+
+                match client.call(methods::MAINTENANCE_GC, params) {
+                    Ok(res) => {
+                        let pruned = res["pruned"].as_u64().unwrap_or(0);
+                        SimpleResponse {
+                            success: true,
+                            message: format!("Successfully pruned {} orphan chunks.", pruned),
+                            code: Some("GC_SUCCESS".to_string()),
+                        }
+                    }
+                    Err(e) => SimpleResponse {
+                        success: false,
+                        message: format!("GC failed: {}", e),
+                        code: Some("GC_FAILED".to_string()),
+                    },
+                }
+            }
+            Err(_) => SimpleResponse {
+                success: false,
+                message: "Daemon is not running. Start it with 'mnem on'".to_string(),
+                code: Some("DAEMON_NOT_RUNNING".to_string()),
+            },
+        };
+
+        if global_opts.json {
+            println!("{}", serde_json::to_string_pretty(&response.json()?)?);
+        } else {
+            layout.section_start("gc", "Garbage Collection");
+            if response.success {
+                layout.item_simple(&format!("{} {}", "√".green(), response.message.bold()));
+            } else {
+                layout.error(&response.message);
+            }
+            layout.section_end();
+        }
+
         Ok(())
     }
 }
