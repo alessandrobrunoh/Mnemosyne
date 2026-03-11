@@ -1,10 +1,8 @@
-use mnem_macros::UiDebug;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-#[derive(UiDebug)]
 pub struct TsHighlighter {
     highlighter: Highlighter,
     configs: HashMap<String, HighlightConfiguration>,

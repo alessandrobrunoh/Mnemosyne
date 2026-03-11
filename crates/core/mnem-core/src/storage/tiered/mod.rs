@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 pub trait StorageLayer {
     fn write(&self, hash: &str, content: &[u8]) -> AppResult<()>;
-    fn read(&self, hash: &str) -> AppResult<Option<Vec<u8>>>;
+    fn read(&self, hash: &str) -> AppResult<Option<bytes::Bytes>>;
     fn delete(&self, hash: &str) -> AppResult<()>;
     fn exists(&self, hash: &str) -> bool;
     fn get_size(&self, hash: &str) -> AppResult<u64>;
@@ -48,7 +48,7 @@ impl TieredStore {
         self.hot.write(hash, content)
     }
 
-    pub fn read(&self, hash: &str) -> AppResult<Vec<u8>> {
+    pub fn read(&self, hash: &str) -> AppResult<bytes::Bytes> {
         // Waterfall read: Hot -> Warm -> Cold
         if let Some(data) = self.hot.read(hash)? {
             return Ok(data);
@@ -96,12 +96,12 @@ impl TieredStore {
         // If old: compress to warm, delete from hot
         let hot = self.hot.scan()?;
         for (hash, age) in hot {
-            if age.as_secs() > self.config.hot_window_hours * 3600 {
-                if let Some(content) = self.hot.read(&hash)? {
-                    self.warm.write(&hash, &content)?;
-                    self.hot.delete(&hash)?;
-                    moved += 1;
-                }
+            if age.as_secs() > self.config.hot_window_hours * 3600
+                && let Some(content) = self.hot.read(&hash)?
+            {
+                self.warm.write(&hash, &content)?;
+                self.hot.delete(&hash)?;
+                moved += 1;
             }
         }
 
@@ -110,12 +110,12 @@ impl TieredStore {
         // If old: compress harder to cold, delete from warm
         let warm = self.warm.scan()?;
         for (hash, age) in warm {
-            if age.as_secs() > self.config.warm_window_days * 86400 {
-                if let Some(content) = self.warm.read(&hash)? {
-                    self.cold.write(&hash, &content)?;
-                    self.warm.delete(&hash)?;
-                    moved += 1;
-                }
+            if age.as_secs() > self.config.warm_window_days * 86400
+                && let Some(content) = self.warm.read(&hash)?
+            {
+                self.cold.write(&hash, &content)?;
+                self.warm.delete(&hash)?;
+                moved += 1;
             }
         }
 

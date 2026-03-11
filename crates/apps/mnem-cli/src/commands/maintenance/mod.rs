@@ -1,7 +1,9 @@
 pub mod config;
 pub mod gc;
-pub mod setup_protocol;
+pub mod uninstall;
+pub mod update;
 
 pub use config::ConfigCommand;
 pub use gc::GcCommand;
-pub use setup_protocol::SetupProtocolCommand;
+pub use uninstall::UninstallCommand;
+pub use update::UpdateCommand;

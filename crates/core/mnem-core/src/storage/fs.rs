@@ -215,7 +215,8 @@ impl CasStorage {
 
     /// Read and decompress an object by its hash.
     /// Validates hash format to prevent path traversal (audit 1.1).
-    pub fn read(&self, hash: &str) -> AppResult<Vec<u8>> {
+    /// Uses Zero-copy mmap for uncompressed data (audit 5.1).
+    pub fn read(&self, hash: &str) -> AppResult<bytes::Bytes> {
         validate_hash(hash)?;
         let object_path = self.object_path(hash);
 
@@ -227,38 +228,48 @@ impl CasStorage {
             if legacy.exists() { legacy } else { object_path }
         };
 
-        let raw = fs::read(&actual_path).map_err(|e| {
+        let file = fs::File::open(&actual_path).map_err(|e| {
             AppError::IoGeneric(std::io::Error::new(
                 e.kind(),
-                format!("Failed to read object {:?}: {}", actual_path, e),
+                format!("Failed to open object {:?}: {}", actual_path, e),
             ))
         })?;
 
-        // Decompress with size limit to prevent decompression bombs
-        const MAX_DECOMPRESSED_SIZE: usize = 256 * 1024 * 1024; // 256 MB
+        let metadata = file.metadata().map_err(AppError::IoGeneric)?;
+        if metadata.len() == 0 {
+            return Ok(bytes::Bytes::new());
+        }
 
-        match zstd::stream::Decoder::new(std::io::Cursor::new(&raw)) {
-            Ok(mut decoder) => {
-                let mut decompressed = Vec::new();
-                let mut buf = [0u8; 64 * 1024];
-                loop {
-                    let n = decoder
-                        .read(&mut buf)
-                        .map_err(|_| AppError::Internal("Decompression failed".into()))?;
-                    if n == 0 {
-                        break;
-                    }
-                    if decompressed.len() + n > MAX_DECOMPRESSED_SIZE {
-                        return Err(AppError::Internal(format!(
-                            "Decompressed size exceeds {} MB limit",
-                            MAX_DECOMPRESSED_SIZE / (1024 * 1024)
-                        )));
-                    }
-                    decompressed.extend_from_slice(&buf[..n]);
+        // Use mmap for zero-copy access to the raw file content
+        let mmap = unsafe { memmap2::Mmap::map(&file).map_err(AppError::IoGeneric)? };
+
+        // --- Robust Zstd Decompression (audit 3.3) ---
+        // Zstd magic number is 0xFD2FB528 (little endian)
+        let is_zstd = mmap.len() >= 4
+            && mmap[0] == 0x28
+            && mmap[1] == 0xB5
+            && mmap[2] == 0x2F
+            && mmap[3] == 0xFD;
+
+        if !is_zstd {
+            // Uncompressed: return Bytes wrapper (copying for now to match interface,
+            // though MNP aims for zero-copy where possible)
+            return Ok(bytes::Bytes::copy_from_slice(&mmap));
+        }
+
+        // Decompress with size limit
+        const MAX_DECOMPRESSED_SIZE: usize = 256 * 1024 * 1024; // 256 MB
+        match zstd::stream::decode_all(std::io::Cursor::new(&mmap)) {
+            Ok(decompressed) => {
+                if decompressed.len() > MAX_DECOMPRESSED_SIZE {
+                    return Err(AppError::Internal(format!(
+                        "Decompressed size exceeds {} MB limit",
+                        MAX_DECOMPRESSED_SIZE / (1024 * 1024)
+                    )));
                 }
-                Ok(decompressed)
+                Ok(bytes::Bytes::from(decompressed))
             }
-            Err(_) => Ok(raw), // Fallback: assume it was uncompressed (legacy file)
+            Err(_) => Ok(bytes::Bytes::copy_from_slice(&mmap)), // Fallback: return raw data if decompression fails
         }
     }
 
@@ -314,18 +325,14 @@ impl CasStorage {
         let mut count = 0;
         if let Ok(entries) = fs::read_dir(&temp_dir) {
             for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
-                        if let Ok(modified) = meta.modified() {
-                            if let Ok(age) = modified.elapsed() {
-                                if age > std::time::Duration::from_secs(3600) {
-                                    if fs::remove_file(entry.path()).is_ok() {
-                                        count += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if let Ok(meta) = entry.metadata()
+                    && meta.is_file()
+                    && let Ok(modified) = meta.modified()
+                    && let Ok(age) = modified.elapsed()
+                    && age > std::time::Duration::from_secs(3600)
+                    && fs::remove_file(entry.path()).is_ok()
+                {
+                    count += 1;
                 }
             }
         }
@@ -350,7 +357,7 @@ mod tests {
         let content = b"Hello, Mnemosyne!";
         let hash = storage.write(content, true).unwrap();
         let result = storage.read(&hash).unwrap();
-        assert_eq!(result, content);
+        assert_eq!(result.as_ref(), &content[..]);
     }
 
     #[test]

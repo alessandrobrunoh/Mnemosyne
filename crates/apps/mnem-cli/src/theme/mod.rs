@@ -24,13 +24,16 @@ pub mod palette;
 pub mod theme;
 
 // Re-exports from palette module
-pub use palette::{Palette, MNEMOSYNE};
+// pub use palette::{Palette, MNEMOSYNE};
 
 // Re-exports from theme module
 pub use theme::Theme;
 
 // Re-exports from builder module
-pub use builder::{get_theme, ThemeBuilder};
+pub use builder::ThemeBuilder;
+#[allow(unused_imports)]
+pub use builder::get_theme;
 
 // Re-export helper functions from palette
+#[allow(unused_imports)]
 pub use palette::{default as default_palette, from_name, list_available};

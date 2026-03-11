@@ -80,8 +80,7 @@ impl zed::Extension for MnemosyneMcpExtension {
         Err(format!(
             "Mnemosyne MCP server ('{}') not found.\n\nPlease either:\n1. Add the binary to your PATH, or\n2. Build it with: cargo build --release -p mnem-mcp\n3. The binary should be at: target/release/mnem-mcp (or mnem-mcp.exe on Windows)",
             binary_name
-        )
-        .into())
+        ))
     }
 
     fn context_server_configuration(

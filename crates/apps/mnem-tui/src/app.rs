@@ -183,10 +183,10 @@ impl AppState {
     }
 
     pub fn clear_expired_notifications(&mut self) {
-        if let Some((_, time)) = self.notification {
-            if time.elapsed() > std::time::Duration::from_secs(3) {
-                self.notification = None;
-            }
+        if let Some((_, time)) = self.notification
+            && time.elapsed() > std::time::Duration::from_secs(3)
+        {
+            self.notification = None;
         }
     }
 

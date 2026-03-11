@@ -295,6 +295,7 @@ pub mod methods {
     pub const PROJECT_CREATE_CHECKPOINT: &str = "mnem/project/checkpoint";
     pub const PROJECT_REVERT_V1: &str = "mnem/project/revert";
     pub const PROJECT_RELOAD: &str = "mnem/project/reload";
+    pub const PROJECT_CLEAR_HISTORY: &str = "mnem/project/clear_history";
     pub const MAINTENANCE_GC: &str = "mnem/maintenance/gc";
     pub const CONFIG_GET_V1: &str = "mnem/config/get";
     pub const CONFIG_SET_V1: &str = "mnem/config/set";
@@ -353,6 +354,11 @@ pub fn normalize_method_name(method: &str) -> &str {
 // ---------------------------------------------------------------------------
 // Typed request/response params
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClearHistoryParams {
+    pub project_path: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WatchParams {

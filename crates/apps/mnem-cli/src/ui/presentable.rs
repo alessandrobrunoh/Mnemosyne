@@ -2,13 +2,19 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::Value;
 
-/// Trait per gli oggetti che possono essere presentati sia in formato TUI che JSON.
-pub trait Presentable {
-    /// Rendering dell'output testuale/grafico (TUI).
-    fn render_tui(&self) -> Result<()>;
+/// Trait per gli oggetti che possono essere renderizzati in formato testuale o JSON.
+pub trait Renderable {
+    /// Rendering dell'output testuale/terminale.
+    fn text(&self) -> Result<()>;
 
-    /// Trasformazione dell'output in un oggetto JSON per l'AI.
-    fn render_json(&self) -> Result<Value>;
+    /// Trasformazione dell'output in JSON.
+    /// Implementazione di default che usa Serialize.
+    fn json(&self) -> Result<Value>
+    where
+        Self: Serialize,
+    {
+        Ok(serde_json::to_value(self)?)
+    }
 }
 
 /// Una risposta semplice per comandi che restituiscono solo un messaggio di stato.
@@ -20,8 +26,8 @@ pub struct SimpleResponse {
     pub code: Option<String>,
 }
 
-impl Presentable for SimpleResponse {
-    fn render_tui(&self) -> Result<()> {
+impl Renderable for SimpleResponse {
+    fn text(&self) -> Result<()> {
         use crate::ui::Layout;
         let layout = Layout::new();
         if self.success {
@@ -30,9 +36,5 @@ impl Presentable for SimpleResponse {
             layout.badge_error("ERROR", &self.message);
         }
         Ok(())
-    }
-
-    fn render_json(&self) -> Result<Value> {
-        Ok(serde_json::to_value(self)?)
     }
 }

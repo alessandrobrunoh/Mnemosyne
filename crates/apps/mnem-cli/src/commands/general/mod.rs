@@ -1,5 +1,5 @@
-pub mod help;
-pub mod version;
+pub mod components;
+pub mod git;
 
-pub use help::HelpCommand;
-pub use version::VersionCommand;
+pub use components::ComponentsCommand;
+pub use git::GitCommand;

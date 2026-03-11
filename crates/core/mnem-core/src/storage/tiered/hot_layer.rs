@@ -22,14 +22,12 @@ impl HotLayer {
 
         for entry in fs::read_dir(&self.root).map_err(AppError::IoGeneric)? {
             let entry = entry.map_err(AppError::IoGeneric)?;
-            if let Ok(meta) = entry.metadata() {
-                if let Ok(modified) = meta.modified() {
-                    if let Ok(age) = SystemTime::now().duration_since(modified) {
-                        if let Ok(name) = entry.file_name().into_string() {
-                            results.push((name, age));
-                        }
-                    }
-                }
+            if let Ok(meta) = entry.metadata()
+                && let Ok(modified) = meta.modified()
+                && let Ok(age) = SystemTime::now().duration_since(modified)
+                && let Ok(name) = entry.file_name().into_string()
+            {
+                results.push((name, age));
             }
         }
         Ok(results)
@@ -45,16 +43,16 @@ impl StorageLayer for HotLayer {
         fs::write(path, compressed).map_err(AppError::IoGeneric)
     }
 
-    fn read(&self, hash: &str) -> AppResult<Option<Vec<u8>>> {
+    fn read(&self, hash: &str) -> AppResult<Option<bytes::Bytes>> {
         let path = self.root.join(hash);
         if path.exists() {
             let data = fs::read(&path).map_err(AppError::IoGeneric)?;
             // Attempt to decompress; if fails (legacy uncompressed), return raw
             match zstd::decode_all(&data[..]) {
-                Ok(decompressed) => Ok(Some(decompressed)),
+                Ok(decompressed) => Ok(Some(bytes::Bytes::from(decompressed))),
                 Err(_) => {
                     // Fallback: assume it relies on legacy uncompressed format
-                    Ok(Some(data))
+                    Ok(Some(bytes::Bytes::from(data)))
                 }
             }
         } else {
