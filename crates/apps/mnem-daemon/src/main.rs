@@ -98,13 +98,15 @@ async fn main() -> Result<()> {
     let socket_path = protocol::get_socket_path(&base_dir);
     let pid_path = base_dir.join(PID_FILE);
 
-    if pid_path.exists()
-        && let Ok(pid_str) = std::fs::read_to_string(&pid_path)
-        && let Ok(pid) = pid_str.trim().parse::<u32>()
-        && mnem_daemon::os::check_running_pid(pid)
-    {
-        eprintln!("mnem-daemon is already running (PID {})", pid);
-        std::process::exit(1);
+    if pid_path.exists() {
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                if mnem_daemon::os::check_running_pid(pid) {
+                    eprintln!("mnem-daemon is already running (PID {})", pid);
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     std::fs::write(&pid_path, std::process::id().to_string())?;

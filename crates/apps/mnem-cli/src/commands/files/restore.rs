@@ -278,12 +278,8 @@ impl CommandStrategy for RestoreCommand {
 
         // --list
         if self.list {
-            let mut history = get_history_for_restore(
-                &mut daemon,
-                repo_opt.as_ref(),
-                &project_path,
-                clean_path,
-            )?;
+            let mut history =
+                get_history_for_restore(&mut daemon, repo_opt.as_ref(), &project_path, clean_path)?;
 
             if let Some(ref br) = self.branch {
                 history.retain(|s| s.git_branch.as_deref().unwrap_or("main") == br);
@@ -340,12 +336,8 @@ impl CommandStrategy for RestoreCommand {
 
         // --undo
         if self.undo {
-            let history = get_history_for_restore(
-                &mut daemon,
-                repo_opt.as_ref(),
-                &project_path,
-                clean_path,
-            )?;
+            let history =
+                get_history_for_restore(&mut daemon, repo_opt.as_ref(), &project_path, clean_path)?;
             if history.len() < 2 {
                 anyhow::bail!("No previous version to restore");
             }
@@ -366,12 +358,8 @@ impl CommandStrategy for RestoreCommand {
                 format!("Restored {} to {}", clean_path, &hash[..8.min(hash.len())])
             };
         } else if let Some(v) = self.version {
-            let history = get_history_for_restore(
-                &mut daemon,
-                repo_opt.as_ref(),
-                &project_path,
-                clean_path,
-            )?;
+            let history =
+                get_history_for_restore(&mut daemon, repo_opt.as_ref(), &project_path, clean_path)?;
             if v == 0 || v > history.len() {
                 anyhow::bail!("Invalid version number. Use --list to see available versions.");
             }
@@ -456,11 +444,12 @@ fn cleanup_old_temp_files() {
             }
 
             let modified = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-            if let Some(modified) = modified
-                && let Ok(age) = now.duration_since(modified)
-                && age > duration
-            {
-                let _ = fs::remove_file(&path);
+            if let Some(modified) = modified {
+                if let Ok(age) = now.duration_since(modified) {
+                    if age > duration {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
             }
         }
     }
@@ -475,22 +464,24 @@ fn cleanup_old_temp_files() {
             }
 
             let modified = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-            if let Some(modified) = modified
-                && let Ok(age) = now.duration_since(modified)
-                && age > duration
-            {
-                let _ = fs::remove_file(&path);
+            if let Some(modified) = modified {
+                if let Ok(age) = now.duration_since(modified) {
+                    if age > duration {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
             }
         }
     }
 }
 
 fn get_project_from_file(file: &Option<String>) -> Result<PathBuf> {
-    if let Some(f) = file
-        && std::path::Path::new(f).is_absolute()
-        && let Some(parent) = std::path::Path::new(f).parent()
-    {
-        return Ok(parent.to_path_buf());
+    if let Some(f) = file {
+        if std::path::Path::new(f).is_absolute() {
+            if let Some(parent) = std::path::Path::new(f).parent() {
+                return Ok(parent.to_path_buf());
+            }
+        }
     }
 
     std::env::current_dir().map_err(|e| anyhow::anyhow!("Cannot get current directory: {}", e))

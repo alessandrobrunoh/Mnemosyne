@@ -287,10 +287,10 @@ temp/
         let _ = self.fs.clean_temp();
 
         // 6. VACUUM to reclaim space
-        if pruned > 0
-            && let Err(e) = self.db.vacuum()
-        {
-            eprintln!("Warning: VACUUM failed: {}", e);
+        if pruned > 0 {
+            if let Err(e) = self.db.vacuum() {
+                eprintln!("Warning: VACUUM failed: {}", e);
+            }
         }
 
         Ok(pruned)
@@ -455,115 +455,118 @@ temp/
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 use crate::semantic::diff::SemanticDiffer;
-                if let Ok(mut parser) = SemanticParser::new()
-                    && let Ok((symbols, references)) =
+                if let Ok(mut parser) = SemanticParser::new() {
+                    if let Ok((symbols, references)) =
                         parser.parse_semantic_data(&content, &ext, snapshot_id, Some(&path_str))
-                {
-                    let mut should_save_symbols = true;
-                    let mut prev_snapshot_id = None;
-                    let mut prev_symbols = Vec::new();
+                    {
+                        let mut should_save_symbols = true;
+                        let mut prev_snapshot_id = None;
+                        let mut prev_symbols = Vec::new();
 
-                    if let Some((pid, psyms)) = previous_snapshot_data {
-                        prev_snapshot_id = Some(pid);
-                        prev_symbols = psyms;
+                        if let Some((pid, psyms)) = previous_snapshot_data {
+                            prev_snapshot_id = Some(pid);
+                            prev_symbols = psyms;
 
-                        // Calculate a "Structural Signature" of the file
-                        let current_sig: String = symbols
-                            .iter()
-                            .map(|s| &s.structural_hash)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("");
-                        let last_sig: String = prev_symbols
-                            .iter()
-                            .map(|s| &s.structural_hash)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("");
+                            // Calculate a "Structural Signature" of the file
+                            let current_sig: String = symbols
+                                .iter()
+                                .map(|s| &s.structural_hash)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("");
+                            let last_sig: String = prev_symbols
+                                .iter()
+                                .map(|s| &s.structural_hash)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("");
 
-                        if current_sig == last_sig && !current_sig.is_empty() {
-                            should_save_symbols = false;
+                            if current_sig == last_sig && !current_sig.is_empty() {
+                                should_save_symbols = false;
+                            }
                         }
-                    }
 
-                    let mut deltas_to_save = Vec::new();
-                    // Compute and store Semantic Deltas
-                    if prev_snapshot_id.is_some() || !symbols.is_empty() {
-                        let deltas = SemanticDiffer::compare(
-                            &prev_symbols,
-                            &symbols,
-                            prev_snapshot_id,
-                            snapshot_id,
-                        );
-                        deltas_to_save = deltas;
-                    }
+                        let mut deltas_to_save = Vec::new();
+                        // Compute and store Semantic Deltas
+                        if prev_snapshot_id.is_some() || !symbols.is_empty() {
+                            let deltas = SemanticDiffer::compare(
+                                &prev_symbols,
+                                &symbols,
+                                prev_snapshot_id,
+                                snapshot_id,
+                            );
+                            deltas_to_save = deltas;
+                        }
 
-                    let mut symbols_to_save = Vec::new();
-                    if should_save_symbols {
-                        // We cannot easily use a stack with parent_id if we want to batch perfectly,
-                        // but we can compute the tree structure here and then batch the list.
-                        // For simplicity, let's just collect them.
-                        let mut parent_stack: Vec<(usize, i64)> = Vec::new();
+                        let mut symbols_to_save = Vec::new();
+                        if should_save_symbols {
+                            // We cannot easily use a stack with parent_id if we want to batch perfectly,
+                            // but we can compute the tree structure here and then batch the list.
+                            // For simplicity, let's just collect them.
+                            let mut parent_stack: Vec<(usize, i64)> = Vec::new();
 
-                        for mut symbol in symbols {
-                            while let Some((parent_end, _)) = parent_stack.last() {
-                                if symbol.start_byte >= *parent_end {
-                                    parent_stack.pop();
-                                } else {
-                                    break;
+                            for mut symbol in symbols {
+                                while let Some((parent_end, _)) = parent_stack.last() {
+                                    if symbol.start_byte >= *parent_end {
+                                        parent_stack.pop();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                if let Some((_, parent_db_id)) = parent_stack.last() {
+                                    symbol.parent_id = Some(*parent_db_id);
+                                }
+                                if let Some((chunk_hash, _, _)) =
+                                    chunks_info.iter().find(|(_, offset, len)| {
+                                        symbol.start_byte >= *offset
+                                            && symbol.start_byte < (*offset + *len)
+                                    })
+                                {
+                                    symbol.chunk_hash = chunk_hash.clone();
+                                }
+
+                                // To get the parent_id correctly, we still need to insert them sequentially
+                                // or compute the IDs locally. redb uses u64 IDs we generate.
+                                // Let's keep the sequential insert for symbols to maintain parent_id integrity,
+                                // but batch the rest.
+                                if let Ok(db_id) = db.insert_symbol(&symbol) {
+                                    parent_stack.push((symbol.end_byte, db_id));
+                                    symbol.id = db_id;
+                                    symbols_to_save.push(symbol.clone());
+
+                                    // Calculate complexity (simple metric: lines of code)
+                                    let complexity =
+                                        symbol.end_line.saturating_sub(symbol.start_line);
+
+                                    // Insert into symbol history with git user attribution
+                                    let _ = db.insert_symbol_history(
+                                        &symbol.name,
+                                        &symbol.kind,
+                                        &symbol.structural_hash,
+                                        &symbol.chunk_hash,
+                                        &git_user_name,
+                                        &git_user_email,
+                                        &timestamp,
+                                        snapshot_id,
+                                        symbol.start_line,
+                                        symbol.end_line,
+                                        complexity,
+                                    );
+
+                                    // Update contributor statistics
+                                    let _ = db.update_symbol_contributor(
+                                        &symbol.name,
+                                        &git_user_email,
+                                        &timestamp,
+                                    );
                                 }
                             }
-                            if let Some((_, parent_db_id)) = parent_stack.last() {
-                                symbol.parent_id = Some(*parent_db_id);
-                            }
-                            if let Some((chunk_hash, _, _)) =
-                                chunks_info.iter().find(|(_, offset, len)| {
-                                    symbol.start_byte >= *offset
-                                        && symbol.start_byte < (*offset + *len)
-                                })
-                            {
-                                symbol.chunk_hash = chunk_hash.clone();
-                            }
-
-                            // To get the parent_id correctly, we still need to insert them sequentially
-                            // or compute the IDs locally. redb uses u64 IDs we generate.
-                            // Let's keep the sequential insert for symbols to maintain parent_id integrity,
-                            // but batch the rest.
-                            if let Ok(db_id) = db.insert_symbol(&symbol) {
-                                parent_stack.push((symbol.end_byte, db_id));
-                                symbol.id = db_id;
-                                symbols_to_save.push(symbol.clone());
-
-                                // Calculate complexity (simple metric: lines of code)
-                                let complexity = symbol.end_line.saturating_sub(symbol.start_line);
-
-                                // Insert into symbol history with git user attribution
-                                let _ = db.insert_symbol_history(
-                                    &symbol.name,
-                                    &symbol.kind,
-                                    &symbol.structural_hash,
-                                    &symbol.chunk_hash,
-                                    &git_user_name,
-                                    &git_user_email,
-                                    &timestamp,
-                                    snapshot_id,
-                                    symbol.start_line,
-                                    symbol.end_line,
-                                    complexity,
-                                );
-
-                                // Update contributor statistics
-                                let _ = db.update_symbol_contributor(
-                                    &symbol.name,
-                                    &git_user_email,
-                                    &timestamp,
-                                );
-                            }
                         }
-                    }
 
-                    // Use the new batch method for references and deltas (Symbols are already saved for parent_id)
-                    let _ = db.batch_insert_semantic_data(Vec::new(), deltas_to_save, references);
+                        // Use the new batch method for references and deltas (Symbols are already saved for parent_id)
+                        let _ =
+                            db.batch_insert_semantic_data(Vec::new(), deltas_to_save, references);
+                    }
                 }
             });
         }
@@ -670,10 +673,10 @@ temp/
         };
 
         // Create a safety snapshot of the current file BEFORE overwriting
-        if target_canonical.exists()
-            && let Err(e) = self.save_snapshot_from_file(&target_canonical)
-        {
-            eprintln!("Warning: failed to create pre-restore snapshot: {}", e);
+        if target_canonical.exists() {
+            if let Err(e) = self.save_snapshot_from_file(&target_canonical) {
+                eprintln!("Warning: failed to create pre-restore snapshot: {}", e);
+            }
         }
 
         let content = self.fs.read(&hash)?;
@@ -732,12 +735,13 @@ temp/
             })
             .filter(|snap| {
                 // If we have trigram results, only check snapshots that contain a matching chunk
-                if !candidate_chunks.is_empty()
-                    && let Ok(chunks) = self.db.get_chunks_for_hash(&snap.content_hash)
-                {
-                    return chunks.iter().any(|h| candidate_chunks.contains(h));
+                if candidate_chunks.is_empty() {
+                    true
+                } else if let Ok(chunks) = self.db.get_chunks_for_hash(&snap.content_hash) {
+                    chunks.iter().any(|h| candidate_chunks.contains(h))
+                } else {
+                    true
                 }
-                true
             })
             .filter_map(|snap| {
                 let content = self.fs.read(&snap.content_hash).ok()?;

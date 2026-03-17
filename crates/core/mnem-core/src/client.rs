@@ -181,11 +181,11 @@ pub fn daemon_running() -> bool {
         return false;
     }
 
-    if let Ok(pid_str) = std::fs::read_to_string(&pid_path)
-        && let Ok(pid) = pid_str.trim().parse::<u32>()
-    {
-        // Use the safe cross-platform is_process_running function
-        return is_process_running(pid).unwrap_or(false);
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            // Use the safe cross-platform is_process_running function
+            return is_process_running(pid).unwrap_or(false);
+        }
     }
 
     false
@@ -284,12 +284,12 @@ fn find_daemon_binary() -> AppResult<PathBuf> {
     }
 
     // 1. Check next to the current binary
-    if let Ok(current_exe) = std::env::current_exe()
-        && let Some(parent) = current_exe.parent()
-    {
-        let sibling = parent.join(&bin_name);
-        if sibling.exists() {
-            return Ok(sibling);
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            let sibling = parent.join(&bin_name);
+            if sibling.exists() {
+                return Ok(sibling);
+            }
         }
     }
 
@@ -299,11 +299,12 @@ fn find_daemon_binary() -> AppResult<PathBuf> {
         if let Ok(output) = std::process::Command::new("which")
             .arg("mnem-daemon")
             .output()
-            && output.status.success()
         {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(PathBuf::from(path));
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Ok(PathBuf::from(path));
+                }
             }
         }
     }

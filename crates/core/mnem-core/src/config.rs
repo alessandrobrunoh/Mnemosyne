@@ -141,10 +141,10 @@ impl From<LegacyConfig> for Config {
         if let Some(val) = legacy.theme_index {
             config.ui.theme_index = val;
         }
-        if let Some(ref val) = legacy.ide
-            && let Some(ide) = Ide::from_str_opt(val)
-        {
-            config.editor.ide = ide;
+        if let Some(ref val) = legacy.ide {
+            if let Some(ide) = Ide::from_str_opt(val) {
+                config.editor.ide = ide;
+            }
         }
 
         config
@@ -184,10 +184,10 @@ impl ConfigManager {
         };
 
         // Auto-save default if missing
-        if !config_path.exists()
-            && let Err(e) = Self::save_to_path(&config, &config_path)
-        {
-            eprintln!("Warning: failed to save default config: {}", e);
+        if !config_path.exists() {
+            if let Err(e) = Self::save_to_path(&config, &config_path) {
+                eprintln!("Warning: failed to save default config: {}", e);
+            }
         }
 
         // Create default global .mnemignore if missing

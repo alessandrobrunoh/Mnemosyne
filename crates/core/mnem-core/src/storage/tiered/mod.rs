@@ -96,12 +96,12 @@ impl TieredStore {
         // If old: compress to warm, delete from hot
         let hot = self.hot.scan()?;
         for (hash, age) in hot {
-            if age.as_secs() > self.config.hot_window_hours * 3600
-                && let Some(content) = self.hot.read(&hash)?
-            {
-                self.warm.write(&hash, &content)?;
-                self.hot.delete(&hash)?;
-                moved += 1;
+            if age.as_secs() > self.config.hot_window_hours * 3600 {
+                if let Some(content) = self.hot.read(&hash)? {
+                    self.warm.write(&hash, &content)?;
+                    self.hot.delete(&hash)?;
+                    moved += 1;
+                }
             }
         }
 
@@ -110,12 +110,12 @@ impl TieredStore {
         // If old: compress harder to cold, delete from warm
         let warm = self.warm.scan()?;
         for (hash, age) in warm {
-            if age.as_secs() > self.config.warm_window_days * 86400
-                && let Some(content) = self.warm.read(&hash)?
-            {
-                self.cold.write(&hash, &content)?;
-                self.warm.delete(&hash)?;
-                moved += 1;
+            if age.as_secs() > self.config.warm_window_days * 86400 {
+                if let Some(content) = self.warm.read(&hash)? {
+                    self.cold.write(&hash, &content)?;
+                    self.warm.delete(&hash)?;
+                    moved += 1;
+                }
             }
         }
 

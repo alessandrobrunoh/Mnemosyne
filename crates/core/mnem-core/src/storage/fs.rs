@@ -325,14 +325,18 @@ impl CasStorage {
         let mut count = 0;
         if let Ok(entries) = fs::read_dir(&temp_dir) {
             for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata()
-                    && meta.is_file()
-                    && let Ok(modified) = meta.modified()
-                    && let Ok(age) = modified.elapsed()
-                    && age > std::time::Duration::from_secs(3600)
-                    && fs::remove_file(entry.path()).is_ok()
-                {
-                    count += 1;
+                if let Ok(meta) = entry.metadata() {
+                    if meta.is_file() {
+                        if let Ok(modified) = meta.modified() {
+                            if let Ok(age) = modified.elapsed() {
+                                if age > std::time::Duration::from_secs(3600) {
+                                    if fs::remove_file(entry.path()).is_ok() {
+                                        count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
