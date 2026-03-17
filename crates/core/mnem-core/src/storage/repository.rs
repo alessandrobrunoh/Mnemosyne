@@ -6,6 +6,7 @@ use crate::storage::registry::ProjectRegistry;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use super::database::Database;
@@ -17,6 +18,7 @@ pub struct Repository {
     pub config: Mutex<ConfigManager>,
     pub project: Project,
     pub ignore: Option<ignore::gitignore::Gitignore>,
+    resolver: Mutex<crate::git::GitUserResolver>,
 }
 
 impl Repository {
@@ -179,6 +181,7 @@ temp/
             config: Mutex::new(config),
             project,
             ignore,
+            resolver: Mutex::new(crate::git::GitUserResolver::new()),
         })
     }
 
@@ -434,6 +437,20 @@ temp/
         let db = self.db.clone();
         let path_str = path_str.clone();
 
+        // Resolve git user for symbol attribution
+        let project_path = PathBuf::from(&self.project.path);
+        let git_user = self
+            .resolver
+            .lock()
+            .map_err(|_| AppError::Internal("Failed to lock resolver".to_string()))?
+            .resolve(&project_path)
+            .unwrap_or(None);
+        let (git_user_name, git_user_email) = if let Some(ref user) = git_user {
+            (user.name.clone(), user.email.clone())
+        } else {
+            ("Unknown".to_string(), "unknown@local".to_string())
+        };
+
         // Only spawn if we're in a Tokio runtime context
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
@@ -515,7 +532,32 @@ temp/
                             if let Ok(db_id) = db.insert_symbol(&symbol) {
                                 parent_stack.push((symbol.end_byte, db_id));
                                 symbol.id = db_id;
-                                symbols_to_save.push(symbol);
+                                symbols_to_save.push(symbol.clone());
+
+                                // Calculate complexity (simple metric: lines of code)
+                                let complexity = symbol.end_line.saturating_sub(symbol.start_line);
+
+                                // Insert into symbol history with git user attribution
+                                let _ = db.insert_symbol_history(
+                                    &symbol.name,
+                                    &symbol.kind,
+                                    &symbol.structural_hash,
+                                    &symbol.chunk_hash,
+                                    &git_user_name,
+                                    &git_user_email,
+                                    &timestamp,
+                                    snapshot_id,
+                                    symbol.start_line,
+                                    symbol.end_line,
+                                    complexity,
+                                );
+
+                                // Update contributor statistics
+                                let _ = db.update_symbol_contributor(
+                                    &symbol.name,
+                                    &git_user_email,
+                                    &timestamp,
+                                );
                             }
                         }
                     }
@@ -854,81 +896,89 @@ temp/
     }
 
     // -----------------------------------------------------------------------
-    // Mass Revert
+    // Checkpoints
     // -----------------------------------------------------------------------
 
     /// Create a checkpoint capturing the current state of all tracked files.
-    pub fn create_checkpoint(&self, description: Option<&str>) -> AppResult<String> {
-        let state = self.db.get_latest_state()?;
+    pub fn create_checkpoint(&self, name: &str, description: Option<&str>) -> AppResult<()> {
+        let state_vec = self.db.get_latest_state()?;
+        let mut file_states = std::collections::HashMap::new();
+        for (path, hash) in state_vec {
+            file_states.insert(path, hash);
+        }
+
         let timestamp = chrono::Local::now().to_rfc3339();
-        let file_states_json = serde_json::to_string(&state)
-            .map_err(|e| AppError::Internal(format!("Failed to serialize checkpoint: {}", e)))?;
-        self.db
-            .save_checkpoint(&timestamp, description, &file_states_json)
+        let branch = self.get_current_branch();
+        // Get last git commit if possible
+        let git_commit = Command::new("git")
+            .args(["-C", &self.project.path, "rev-parse", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if hash.is_empty() { None } else { Some(hash) }
+                } else {
+                    None
+                }
+            });
+
+        self.db.save_checkpoint(
+            name,
+            &timestamp,
+            branch.as_deref(),
+            git_commit.as_deref(),
+            description,
+            file_states,
+        )
     }
 
-    pub fn list_checkpoints(&self) -> AppResult<Vec<(String, String, Option<String>)>> {
+    pub fn list_checkpoints(&self) -> AppResult<Vec<crate::storage::database::CheckpointData>> {
         self.db.list_checkpoints()
     }
 
-    /// Delete a checkpoint by its hash.
-    pub fn delete_checkpoint(&self, hash: &str) -> AppResult<bool> {
-        self.db.delete_checkpoint(hash)
+    /// Delete a checkpoint by its name.
+    pub fn delete_checkpoint(&self, name: &str) -> AppResult<bool> {
+        self.db.delete_checkpoint(name)
     }
 
-    /// List all Git commits with their metadata.
-    pub fn list_commits(&self) -> AppResult<Vec<crate::storage::database::CommitInfo>> {
-        self.db.get_commits()
+    /// Update a single file in an existing checkpoint to its latest state.
+    pub fn update_checkpoint_file(&self, name: &str, file_path: &str) -> AppResult<bool> {
+        let last_hash = match self.db.get_last_hash(file_path)? {
+            Some(h) => h,
+            None => return Ok(false),
+        };
+
+        self.db.update_checkpoint_file(name, file_path, &last_hash)
     }
 
-    /// Get details of a specific commit by hash.
-    pub fn get_commit_details(
+    pub fn get_checkpoint_manifest(
         &self,
-        hash: &str,
-    ) -> AppResult<Option<(String, String, String, String)>> {
-        self.db.get_commit_by_hash(hash)
+        name: &str,
+    ) -> AppResult<Option<std::collections::HashMap<String, String>>> {
+        Ok(self.db.get_checkpoint(name)?.map(|d| d.file_states))
     }
 
-    /// Get all files included in a specific commit.
-    pub fn get_commit_files(&self, hash: &str) -> AppResult<Vec<(String, String, String)>> {
-        self.db.get_commit_files(hash)
-    }
-
-    /// Insert a Git commit into the database.
-    pub fn insert_git_commit(
-        &self,
-        hash: &str,
-        message: &str,
-        author: &str,
-        timestamp: &str,
-    ) -> AppResult<()> {
-        self.db.insert_git_commit(hash, message, author, timestamp)
-    }
-
-    /// Revert entire project to a specific checkpoint hash.
-    pub fn revert_to_checkpoint(&self, hash_query: &str) -> AppResult<usize> {
-        let (_timestamp, file_states_json, _desc) = self
+    /// Revert entire project to a specific checkpoint name.
+    pub fn revert_to_checkpoint(&self, name: &str) -> AppResult<usize> {
+        let data = self
             .db
-            .get_checkpoint_by_hash(hash_query)?
-            .ok_or_else(|| AppError::Internal(format!("Checkpoint not found: {}", hash_query)))?;
-
-        let state: Vec<(String, String)> = serde_json::from_str(&file_states_json)
-            .map_err(|e| AppError::Internal(format!("Failed to parse checkpoint: {}", e)))?;
+            .get_checkpoint(name)?
+            .ok_or_else(|| AppError::Internal(format!("Checkpoint not found: {}", name)))?;
 
         // 1. Safety checkpoint
-        let short_hash = if hash_query.len() > 8 {
-            &hash_query[..8]
-        } else {
-            hash_query
-        };
-        let _ = self.create_checkpoint(Some(&format!(
-            "Safety save before reverting to {}",
-            short_hash
-        )));
+        let safety_name = format!(
+            "Pre-revert-{}",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        );
+        let _ = self.create_checkpoint(
+            &safety_name,
+            Some(&format!("Safety save before reverting to {}", name)),
+        );
 
         // 2. Restore files
         let mut count = 0;
-        for (path, hash) in state {
+        for (path, hash) in data.file_states {
             if self.restore_file(&hash, &path).is_ok() {
                 count += 1;
             }
@@ -937,24 +987,15 @@ temp/
         Ok(count)
     }
 
-    /// Get details of a checkpoint by hash.
-    pub fn get_checkpoint_details(
-        &self,
-        hash: &str,
-    ) -> AppResult<Option<(String, String, Option<String>)>> {
-        let result = self.db.get_checkpoint_by_hash(hash)?;
-        if let Some((ts, states_json, desc)) = result {
-            Ok(Some((ts, states_json, desc)))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Revert the entire project to a specific timestamp.
     /// Creates a safety checkpoint first, then restores all files.
     pub fn revert_to_timestamp(&self, timestamp: &str) -> AppResult<usize> {
         // 1. Safety checkpoint
-        self.create_checkpoint(Some("Pre-revert safety checkpoint"))?;
+        let safety_name = format!(
+            "Pre-revert-ts-{}",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        );
+        self.create_checkpoint(&safety_name, Some("Pre-revert safety checkpoint"))?;
 
         // 2. Get the project state at that timestamp
         let state = self.db.get_state_at_timestamp(timestamp)?;

@@ -73,6 +73,11 @@ Requests the server process to terminate.
 - `mnem/project/list`: List all watched projects.
 - `mnem/project/activity`: Get recent activity across projects.
 - `mnem/project/statistics`: Get storage and activity metrics.
+- `mnem/project/checkpoint`: Create or update a project-wide checkpoint.
+- `mnem/project/checkpoint/list`: List all checkpoints for a project.
+- `mnem/project/checkpoint/remove`: Delete a specific checkpoint.
+- `mnem/project/checkpoint/get`: Get the file manifest of a checkpoint.
+- `mnem/project/revert`: Revert the entire project to a specific checkpoint or timestamp.
 
 ### Snapshots
 - `mnem/snapshot/create`: Manually trigger a snapshot.
