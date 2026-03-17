@@ -102,7 +102,10 @@ impl Renderable for HistoryResponse {
             }
 
             if content_found {
-                snapshot_links.insert(snap.content_hash.clone(), temp_path.to_string_lossy().to_string());
+                snapshot_links.insert(
+                    snap.content_hash.clone(),
+                    temp_path.to_string_lossy().to_string(),
+                );
             }
         }
 
@@ -242,30 +245,32 @@ impl HistoryCommand {
         let mut success = false;
         let mut message = String::new();
 
-        if mnem_core::client::daemon_running()
-            && let Ok(mut client) = DaemonClient::connect()
-        {
-            let params = mnem_core::protocol::ClearHistoryParams {
-                project_path: project_path.to_string_lossy().to_string(),
-            };
-            match client.call(
-                methods::PROJECT_CLEAR_HISTORY,
-                serde_json::to_value(params)?,
-            ) {
-                Ok(res) => {
-                    let cleared = res
-                        .get("cleared_snapshots")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    success = true;
-                    message = format!(
-                        "Successfully cleared history ({} snapshots deleted)",
-                        cleared
-                    );
+        if mnem_core::client::daemon_running() {
+            if let Ok(mut client) = DaemonClient::connect() {
+                let params = mnem_core::protocol::ClearHistoryParams {
+                    project_path: project_path.to_string_lossy().to_string(),
+                };
+                match client.call(
+                    methods::PROJECT_CLEAR_HISTORY,
+                    serde_json::to_value(params)?,
+                ) {
+                    Ok(res) => {
+                        let cleared = res
+                            .get("cleared_snapshots")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        success = true;
+                        message = format!(
+                            "Successfully cleared history ({} snapshots deleted)",
+                            cleared
+                        );
+                    }
+                    Err(e) => {
+                        message = format!("Failed to clear history: {}", e);
+                    }
                 }
-                Err(e) => {
-                    message = format!("Failed to clear history: {}", e);
-                }
+            } else {
+                message = "Daemon must be running to clear history".to_string();
             }
         } else {
             message = "Daemon must be running to clear history".to_string();

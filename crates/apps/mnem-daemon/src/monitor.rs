@@ -135,14 +135,14 @@ impl Monitor {
 
                     for entry in walker.filter_map(|r| r.ok()) {
                         let path = entry.path();
-                        if path.is_file()
-                            && !self.is_ignored(path, Some(&mnemignore))
-                            && let Ok(history) = self.repo.get_history(&path.to_string_lossy())
-                            && history.is_empty()
-                        {
-                            // This is a new file, save it
-                            log::info!("Polling: found new file {:?}", path);
-                            self.process_file(path, max_file_size);
+                        if path.is_file() && !self.is_ignored(path, Some(&mnemignore)) {
+                            if let Ok(history) = self.repo.get_history(&path.to_string_lossy()) {
+                                if history.is_empty() {
+                                    // This is a new file, save it
+                                    log::info!("Polling: found new file {:?}", path);
+                                    self.process_file(path, max_file_size);
+                                }
+                            }
                         }
                     }
                 }
@@ -153,17 +153,21 @@ impl Monitor {
 
                         for snapshot in recent_snapshots {
                             let file_path = PathBuf::from(&snapshot.file_path);
-                            if !self.is_ignored(&file_path, Some(&mnemignore))
-                                && let Ok(metadata) = file_path.metadata()
-                                && let Ok(modified) = metadata.modified()
-                                && let Ok(snapshot_dt) =
-                                    chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp)
-                            {
-                                let snapshot_time: SystemTime = snapshot_dt.into();
-                                if let Ok(modified_dt) = modified.duration_since(snapshot_time)
-                                    && modified_dt.as_secs() > 0
-                                {
-                                    missed_changes.push(file_path);
+                            if !self.is_ignored(&file_path, Some(&mnemignore)) {
+                                if let Ok(metadata) = file_path.metadata() {
+                                    if let Ok(modified) = metadata.modified() {
+                                        if let Ok(snapshot_dt) =
+                                            chrono::DateTime::parse_from_rfc3339(&snapshot.timestamp)
+                                        {
+                                            let snapshot_time: SystemTime = snapshot_dt.into();
+                                            if let Ok(modified_dt) = modified.duration_since(snapshot_time)
+                                            {
+                                                if modified_dt.as_secs() > 0 {
+                                                    missed_changes.push(file_path);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -186,18 +190,19 @@ impl Monitor {
         }
 
         // Symlink protection: resolve and verify the file is inside the project root (audit 1.3)
-        if let Ok(canonical) = path.canonicalize()
-            && let Ok(root_canonical) = self.root_path.canonicalize()
-            && !canonical.starts_with(&root_canonical)
-        {
-            return; // Symlink pointing outside the project
+        if let Ok(canonical) = path.canonicalize() {
+            if let Ok(root_canonical) = self.root_path.canonicalize() {
+                if !canonical.starts_with(&root_canonical) {
+                    return; // Symlink pointing outside the project
+                }
+            }
         }
 
         // File size limit (audit 4.6)
-        if let Ok(metadata) = path.metadata()
-            && metadata.len() > max_file_size
-        {
-            return; // Skip files exceeding size limit
+        if let Ok(metadata) = path.metadata() {
+            if metadata.len() > max_file_size {
+                return; // Skip files exceeding size limit
+            }
         }
 
         // Check binary content
@@ -315,11 +320,12 @@ impl Monitor {
         }
 
         // 2. Project-level .mnemignore
-        if config.storage.use_mnemosyneignore
-            && let Some(ignore_path) =
+        if config.storage.use_mnemosyneignore {
+            if let Some(ignore_path) =
                 Some(self.root_path.join(".mnemosyneignore")).filter(|p| p.exists())
-        {
-            builder.add(ignore_path);
+            {
+                builder.add(ignore_path);
+            }
         }
 
         builder

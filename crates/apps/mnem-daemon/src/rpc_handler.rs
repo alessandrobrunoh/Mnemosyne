@@ -912,10 +912,9 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 let mut symbols_map = json!({});
                 for f in files {
                     files_list.push(json!(f.path));
-                    if let Ok(snaps) = repo.db.get_history(&f.path)
-                        && let Some(latest) = snaps.first()
-                        && let Ok(symbols) = repo.db.get_symbols_for_snapshot(latest.id)
-                    {
+                    if let Ok(snaps) = repo.db.get_history(&f.path) {
+                        if let Some(latest) = snaps.first() {
+                            if let Ok(symbols) = repo.db.get_symbols_for_snapshot(latest.id) {
                         symbols_map[&f.path] = json!(
                             symbols
                                 .into_iter()
@@ -1012,10 +1011,9 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 }
             }
 
-            if let Some((_, repo)) = best_match
-                && let Ok(history) = repo.db.get_history(file_path)
-                && let Some(latest) = history.first()
-            {
+            if let Some((_, repo)) = best_match {
+                if let Ok(history) = repo.db.get_history(file_path) {
+                    if let Some(latest) = history.first() {
                 let info = json!({
                     "path": file_path,
                     "snapshot_count": history.len(),
@@ -1446,24 +1444,24 @@ fn find_mcp_binary() -> Result<std::path::PathBuf, String> {
     }
 
     // 1. Check next to the current binary
-    if let Ok(current_exe) = std::env::current_exe()
-        && let Some(parent) = current_exe.parent()
-    {
-        let sibling = parent.join(&bin_name);
-        if sibling.exists() {
-            return Ok(sibling);
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            let sibling = parent.join(&bin_name);
+            if sibling.exists() {
+                return Ok(sibling);
+            }
         }
     }
 
     // 2. Check PATH
     #[cfg(unix)]
     {
-        if let Ok(output) = std::process::Command::new("which").arg("mnem-mcp").output()
-            && output.status.success()
-        {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(std::path::PathBuf::from(path));
+        if let Ok(output) = std::process::Command::new("which").arg("mnem-mcp").output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Ok(std::path::PathBuf::from(path));
+                }
             }
         }
     }

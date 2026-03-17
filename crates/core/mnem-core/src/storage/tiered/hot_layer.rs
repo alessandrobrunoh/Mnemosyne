@@ -22,12 +22,14 @@ impl HotLayer {
 
         for entry in fs::read_dir(&self.root).map_err(AppError::IoGeneric)? {
             let entry = entry.map_err(AppError::IoGeneric)?;
-            if let Ok(meta) = entry.metadata()
-                && let Ok(modified) = meta.modified()
-                && let Ok(age) = SystemTime::now().duration_since(modified)
-                && let Ok(name) = entry.file_name().into_string()
-            {
-                results.push((name, age));
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if let Ok(age) = SystemTime::now().duration_since(modified) {
+                        if let Ok(name) = entry.file_name().into_string() {
+                            results.push((name, age));
+                        }
+                    }
+                }
             }
         }
         Ok(results)

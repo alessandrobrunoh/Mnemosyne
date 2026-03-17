@@ -12,10 +12,10 @@ pub fn is_on_battery() -> bool {
 
     // Fallback: check sysfs on Linux
     let battery_path = Path::new("/sys/class/power_supply/BAT0/status");
-    if battery_path.exists()
-        && let Ok(status) = std::fs::read_to_string(battery_path)
-    {
-        return status.trim() == "Discharging";
+    if battery_path.exists() {
+        if let Ok(status) = std::fs::read_to_string(battery_path) {
+            return status.trim() == "Discharging";
+        }
     }
 
     false
@@ -39,11 +39,12 @@ pub fn battery_level() -> Option<u8> {
 
     // Linux fallback
     let capacity_path = Path::new("/sys/class/power_supply/BAT0/capacity");
-    if capacity_path.exists()
-        && let Ok(content) = std::fs::read_to_string(capacity_path)
-        && let Ok(level) = content.trim().parse::<u8>()
-    {
-        return Some(level);
+    if capacity_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(capacity_path) {
+            if let Ok(level) = content.trim().parse::<u8>() {
+                return Some(level);
+            }
+        }
     }
 
     None
