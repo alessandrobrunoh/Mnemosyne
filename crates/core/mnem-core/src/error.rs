@@ -12,6 +12,9 @@ pub enum AppError {
         source: std::io::Error,
     },
 
+    #[error("Invalid path: {0}")]
+    InvalidPath(String),
+
     #[error("Generic IO error: {0}")]
     IoGeneric(#[from] std::io::Error),
 

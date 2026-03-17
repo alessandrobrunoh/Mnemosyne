@@ -282,6 +282,7 @@ pub mod methods {
     pub const SYMBOL_GET_DIFF: &str = "mnem/symbol/diff";
     pub const SYMBOL_SEARCH: &str = "mnem/symbol/search";
     pub const SYMBOL_GET_SEMANTIC_HISTORY: &str = "mnem/symbol/semantic_history";
+    pub const SYMBOL_BLAME: &str = "mnem/symbol/blame";
     pub const FILE_GET_LIST: &str = "mnem/file/list";
     pub const FILE_SEARCH_V1: &str = "mnem/file/search";
     pub const CONTENT_SEARCH_V1: &str = "mnem/content/search";
@@ -292,7 +293,11 @@ pub mod methods {
     pub const SESSION_GET_LIST: &str = "mnem/session/list";
     pub const SESSION_GET_ACTIVE: &str = "mnem/session/active";
     pub const SESSION_GET_TIMESHEET: &str = "mnem/session/timesheet";
-    pub const PROJECT_CREATE_CHECKPOINT: &str = "mnem/project/checkpoint";
+    pub const PROJECT_CREATE_CHECKPOINT: &str = "mnem/project/checkpoint/create";
+    pub const PROJECT_LIST_CHECKPOINTS: &str = "mnem/project/checkpoint/list";
+    pub const PROJECT_REMOVE_CHECKPOINT: &str = "mnem/project/checkpoint/remove";
+    pub const PROJECT_GET_CHECKPOINT: &str = "mnem/project/checkpoint/get";
+    pub const PROJECT_UPDATE_CHECKPOINT_FILE: &str = "mnem/project/checkpoint/update_file";
     pub const PROJECT_REVERT_V1: &str = "mnem/project/revert";
     pub const PROJECT_RELOAD: &str = "mnem/project/reload";
     pub const PROJECT_CLEAR_HISTORY: &str = "mnem/project/clear_history";
@@ -528,7 +533,45 @@ pub struct ContentSearchParams {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProjectRevertParams {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckpointCreateParams {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckpointRemoveParams {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckpointGetParams {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckpointUpdateFileParams {
+    pub name: String,
+    pub file_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckpointInfo {
+    pub name: String,
     pub timestamp: String,
+    pub git_branch: Option<String>,
+    pub git_commit: Option<String>,
+    pub description: Option<String>,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckpointManifestResponse {
+    pub name: String,
+    pub file_states: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

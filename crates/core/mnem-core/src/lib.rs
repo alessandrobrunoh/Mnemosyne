@@ -2,6 +2,7 @@ pub mod client;
 pub mod config;
 pub mod env;
 pub mod error;
+pub mod git;
 pub mod ipc;
 pub mod models;
 pub mod os;

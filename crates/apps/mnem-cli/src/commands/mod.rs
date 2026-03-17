@@ -5,6 +5,7 @@ pub mod daemon;
 pub mod files;
 pub mod general;
 pub mod maintenance;
+pub mod symbols;
 pub mod workspace;
 
 use common::{CommandStrategy, GlobalOptions};
@@ -16,7 +17,8 @@ use daemon::{
 use files::{HistoryCommand, InfoCommand, RestoreCommand, SearchCommand};
 use general::{ComponentsCommand, GitCommand};
 use maintenance::{ConfigCommand, GcCommand, UninstallCommand, UpdateCommand};
-use workspace::TrackCommand;
+use symbols::BlameCommand;
+use workspace::{CheckpointCommand, TrackCommand};
 
 /// Macro to generate the Commands enum and execute() method
 ///
@@ -72,4 +74,8 @@ declare_commands! {
 
     // Workspace commands
     Track => TrackCommand,
+    Checkpoint => CheckpointCommand,
+
+    // Symbol commands
+    Blame => BlameCommand,
 }

@@ -115,6 +115,12 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                     protocol::methods::SYMBOL_SEARCH.to_string(),
                     protocol::methods::CONTENT_SEARCH_V1.to_string(),
                     protocol::methods::PROJECT_GET_STATISTICS.to_string(),
+                    protocol::methods::PROJECT_CREATE_CHECKPOINT.to_string(),
+                    protocol::methods::PROJECT_LIST_CHECKPOINTS.to_string(),
+                    protocol::methods::PROJECT_REMOVE_CHECKPOINT.to_string(),
+                    protocol::methods::PROJECT_GET_CHECKPOINT.to_string(),
+                    protocol::methods::PROJECT_UPDATE_CHECKPOINT_FILE.to_string(),
+                    protocol::methods::PROJECT_REVERT_V1.to_string(),
                     protocol::methods::DAEMON_GET_STATUS.to_string(),
                     protocol::methods::SYMBOL_GET_SEMANTIC_HISTORY.to_string(),
                     protocol::methods::MCP_START.to_string(),
@@ -1153,6 +1159,132 @@ pub async fn handle_request(req: &JsonRpcRequest, state: &Arc<DaemonState>) -> J
                 req.id,
                 serde_json::to_value(resp).unwrap_or(json!({"projects": []})),
             )
+        }
+
+        protocol::methods::PROJECT_CREATE_CHECKPOINT => {
+            let params: protocol::CheckpointCreateParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
+            };
+
+            let repos: Vec<Arc<Repository>> = state.repos.iter().map(|r| r.value().clone()).collect();
+            if repos.is_empty() {
+                return JsonRpcResponse::error(req.id, PROJECT_NOT_FOUND, "No monitored projects found".into());
+            }
+
+            for repo in repos {
+                if let Err(e) = repo.create_checkpoint(&params.name, params.description.as_deref()) {
+                    error!("Failed to create checkpoint for {}: {}", repo.project.path, e);
+                    return JsonRpcResponse::error(req.id, STORAGE_ERROR, e.to_string());
+                }
+            }
+
+            JsonRpcResponse::success(req.id, json!({ "status": "created", "name": params.name }))
+        }
+
+        protocol::methods::PROJECT_LIST_CHECKPOINTS => {
+            let mut all_checkpoints = Vec::new();
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                if let Ok(checkpoints) = repo.list_checkpoints() {
+                    for cp in checkpoints {
+                        all_checkpoints.push(protocol::CheckpointInfo {
+                            name: cp.name,
+                            timestamp: cp.timestamp,
+                            git_branch: cp.git_branch,
+                            git_commit: cp.git_commit,
+                            description: cp.description,
+                            file_count: cp.file_states.len(),
+                        });
+                    }
+                }
+            }
+            all_checkpoints.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            all_checkpoints.dedup_by(|a, b| a.name == b.name);
+
+            JsonRpcResponse::success(req.id, serde_json::to_value(all_checkpoints).unwrap_or(json!([])))
+        }
+
+        protocol::methods::PROJECT_REMOVE_CHECKPOINT => {
+            let params: protocol::CheckpointRemoveParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
+            };
+
+            let mut removed = false;
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                if let Ok(true) = repo.delete_checkpoint(&params.name) {
+                    removed = true;
+                }
+            }
+
+            if removed {
+                JsonRpcResponse::success(req.id, json!({ "status": "removed", "name": params.name }))
+            } else {
+                JsonRpcResponse::error(req.id, SNAPSHOT_NOT_FOUND, format!("Checkpoint '{}' not found", params.name))
+            }
+        }
+
+        protocol::methods::PROJECT_GET_CHECKPOINT => {
+            let params: protocol::CheckpointGetParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
+            };
+
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                if let Ok(Some(manifest)) = repo.get_checkpoint_manifest(&params.name) {
+                    return JsonRpcResponse::success(req.id, json!({
+                        "name": params.name,
+                        "file_states": manifest
+                    }));
+                }
+            }
+            JsonRpcResponse::error(req.id, SNAPSHOT_NOT_FOUND, format!("Checkpoint '{}' not found", params.name))
+        }
+
+        protocol::methods::PROJECT_UPDATE_CHECKPOINT_FILE => {
+            let params: protocol::CheckpointUpdateFileParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
+            };
+
+            let mut updated = false;
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                if let Ok(true) = repo.update_checkpoint_file(&params.name, &params.file_path) {
+                    updated = true;
+                }
+            }
+
+            if updated {
+                JsonRpcResponse::success(req.id, json!({ "status": "updated", "name": params.name, "file": params.file_path }))
+            } else {
+                JsonRpcResponse::error(req.id, SNAPSHOT_NOT_FOUND, format!("Checkpoint '{}' not found or file not tracked", params.name))
+            }
+        }
+
+        protocol::methods::PROJECT_REVERT_V1 => {
+            let params: protocol::ProjectRevertParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return JsonRpcResponse::error(req.id, INVALID_PARAMS, format!("Invalid params: {}", e)),
+            };
+
+            let mut count = 0;
+            for repo_entry in state.repos.iter() {
+                let repo = repo_entry.value();
+                match repo.revert_to_checkpoint(&params.name) {
+                    Ok(c) => count += c,
+                    Err(_) => {
+                        if let Ok(c) = repo.revert_to_timestamp(&params.name) {
+                            count += c;
+                        }
+                    }
+                }
+            }
+
+            JsonRpcResponse::success(req.id, json!({ "restored_files": count }))
         }
 
         protocol::methods::SHUTDOWN => {

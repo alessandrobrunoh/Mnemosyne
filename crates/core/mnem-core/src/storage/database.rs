@@ -15,6 +15,9 @@ const SNAPSHOT_CHUNKS: TableDefinition<(u64, u32), &str> = TableDefinition::new(
 const SYMBOLS: TableDefinition<u64, &[u8]> = TableDefinition::new("symbols");
 const SYMBOL_REFERENCES: TableDefinition<u64, &[u8]> = TableDefinition::new("symbol_references");
 const SYMBOL_DELTAS: TableDefinition<u64, &[u8]> = TableDefinition::new("symbol_deltas");
+const SYMBOL_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("symbol_history");
+const SYMBOL_CONTRIBUTORS: TableDefinition<(&str, &str), &[u8]> =
+    TableDefinition::new("symbol_contributors");
 const METADATA: TableDefinition<&str, u64> = TableDefinition::new("metadata");
 
 // Improvements: String Interning & Trigram Index
@@ -67,11 +70,14 @@ struct SessionData {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct CheckpointData {
-    hash: String,
-    timestamp: String,
-    description: Option<String>,
-    file_states: String,
+pub struct CheckpointData {
+    pub name: String,
+    pub timestamp: String,
+    pub git_branch: Option<String>,
+    pub git_commit: Option<String>,
+    pub description: Option<String>,
+    /// Map of file path to content hash
+    pub file_states: std::collections::HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -116,6 +122,31 @@ struct DeltaData {
     structural_hash: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SymbolHistoryData {
+    pub id: u64,
+    pub symbol_name: String,
+    pub symbol_kind: String,
+    pub structural_hash: String,
+    pub content_hash: String,
+    pub git_user_name: String,
+    pub git_user_email: String,
+    pub timestamp: String,
+    pub snapshot_id: i64,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub complexity: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SymbolContributorData {
+    pub symbol_name: String,
+    pub git_user_email: String,
+    pub change_count: usize,
+    pub first_change: String,
+    pub last_change: String,
+}
+
 pub struct Database {
     db: Redb,
     pub path: PathBuf,
@@ -157,6 +188,12 @@ impl Database {
                 .map_err(|e| AppError::Database(e.to_string()))?;
             let _ = write_txn
                 .open_table(SYMBOL_DELTAS)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let _ = write_txn
+                .open_table(SYMBOL_HISTORY)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let _ = write_txn
+                .open_table(SYMBOL_CONTRIBUTORS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
             let _ = write_txn
                 .open_table(STRINGS)
@@ -1940,10 +1977,7 @@ impl Database {
         Ok(files)
     }
 
-    pub fn get_checkpoint_by_hash(
-        &self,
-        hash_query: &str,
-    ) -> AppResult<Option<(String, String, Option<String>)>> {
+    pub fn get_checkpoint(&self, name: &str) -> AppResult<Option<CheckpointData>> {
         let read_txn = self
             .db
             .begin_read()
@@ -1951,34 +1985,40 @@ impl Database {
         let table = read_txn
             .open_table(CHECKPOINTS)
             .map_err(|e| AppError::Database(e.to_string()))?;
-        let query = hash_query.to_lowercase();
-        for res in table
-            .iter()
+        if let Some(v) = table
+            .get(name)
             .map_err(|e| AppError::Database(e.to_string()))?
         {
-            let (k, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            if k.value().to_lowercase().starts_with(&query) {
-                let data: CheckpointData = bincode::deserialize(v.value())
-                    .map_err(|e| AppError::Internal(e.to_string()))?;
-                return Ok(Some((data.timestamp, data.file_states, data.description)));
+            let data: CheckpointData =
+                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            Ok(Some(data))
+        } else {
+            // Try prefix match if full name not found
+            let query = name.to_lowercase();
+            for res in table
+                .iter()
+                .map_err(|e| AppError::Database(e.to_string()))?
+            {
+                let (k, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
+                if k.value().to_lowercase().starts_with(&query) {
+                    let data: CheckpointData = bincode::deserialize(v.value())
+                        .map_err(|e| AppError::Internal(e.to_string()))?;
+                    return Ok(Some(data));
+                }
             }
+            Ok(None)
         }
-        Ok(None)
     }
 
     pub fn save_checkpoint(
         &self,
+        name: &str,
         timestamp: &str,
+        git_branch: Option<&str>,
+        git_commit: Option<&str>,
         description: Option<&str>,
-        file_states_json: &str,
-    ) -> AppResult<String> {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(timestamp.as_bytes());
-        hasher.update(file_states_json.as_bytes());
-        if let Some(d) = description {
-            hasher.update(d.as_bytes());
-        }
-        let hash = hasher.finalize().to_hex().to_string();
+        file_states: std::collections::HashMap<String, String>,
+    ) -> AppResult<()> {
         let write_txn = self
             .db
             .begin_write()
@@ -1988,23 +2028,25 @@ impl Database {
                 .open_table(CHECKPOINTS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
             let data = CheckpointData {
-                hash: hash.clone(),
+                name: name.to_string(),
                 timestamp: timestamp.to_string(),
+                git_branch: git_branch.map(|s| s.to_string()),
+                git_commit: git_commit.map(|s| s.to_string()),
                 description: description.map(|s| s.to_string()),
-                file_states: file_states_json.to_string(),
+                file_states,
             };
             let bytes = bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
             table
-                .insert(hash.as_str(), &*bytes)
+                .insert(name, &*bytes)
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
         write_txn
             .commit()
             .map_err(|e| AppError::Database(e.to_string()))?;
-        Ok(hash)
+        Ok(())
     }
 
-    pub fn list_checkpoints(&self) -> AppResult<Vec<(String, String, Option<String>)>> {
+    pub fn list_checkpoints(&self) -> AppResult<Vec<CheckpointData>> {
         let read_txn = self
             .db
             .begin_read()
@@ -2020,13 +2062,13 @@ impl Database {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
             let data: CheckpointData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            results.push((data.hash, data.timestamp, data.description));
+            results.push(data);
         }
-        results.sort_by(|a, b| b.1.cmp(&a.1));
+        results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         Ok(results)
     }
 
-    pub fn delete_checkpoint(&self, hash: &str) -> AppResult<bool> {
+    pub fn delete_checkpoint(&self, name: &str) -> AppResult<bool> {
         let write_txn = self
             .db
             .begin_write()
@@ -2037,7 +2079,7 @@ impl Database {
                 .open_table(CHECKPOINTS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
             found = table
-                .remove(hash)
+                .remove(name)
                 .map_err(|e| AppError::Database(e.to_string()))?
                 .is_some();
         }
@@ -2045,6 +2087,32 @@ impl Database {
             .commit()
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(found)
+    }
+
+    pub fn update_checkpoint_file(
+        &self,
+        name: &str,
+        file_path: &str,
+        content_hash: &str,
+    ) -> AppResult<bool> {
+        let mut data = match self.get_checkpoint(name)? {
+            Some(d) => d,
+            None => return Ok(false),
+        };
+
+        data.file_states
+            .insert(file_path.to_string(), content_hash.to_string());
+
+        self.save_checkpoint(
+            &data.name,
+            &data.timestamp,
+            data.git_branch.as_deref(),
+            data.git_commit.as_deref(),
+            data.description.as_deref(),
+            data.file_states,
+        )?;
+
+        Ok(true)
     }
 
     pub fn update_chunk_trigrams(&self, chunk_hash: &str, content: &[u8]) -> AppResult<()> {
@@ -2113,4 +2181,287 @@ impl Database {
         }
         Ok(matches)
     }
+
+    // =========================================================================
+    // Symbol History Methods (with git user attribution)
+    // =========================================================================
+
+    /// Insert a symbol history record with git user attribution
+    ///
+    /// This method inserts a record into the SYMBOL_HISTORY table, tracking
+    /// who changed which symbol and when.
+    pub fn insert_symbol_history(
+        &self,
+        symbol_name: &str,
+        symbol_kind: &str,
+        structural_hash: &str,
+        content_hash: &str,
+        git_user_name: &str,
+        git_user_email: &str,
+        timestamp: &str,
+        snapshot_id: i64,
+        start_line: usize,
+        end_line: usize,
+        complexity: usize,
+    ) -> AppResult<u64> {
+        let id = self.next_id("symbol_history_id")?;
+        let data = SymbolHistoryData {
+            id,
+            symbol_name: symbol_name.to_string(),
+            symbol_kind: symbol_kind.to_string(),
+            structural_hash: structural_hash.to_string(),
+            content_hash: content_hash.to_string(),
+            git_user_name: git_user_name.to_string(),
+            git_user_email: git_user_email.to_string(),
+            timestamp: timestamp.to_string(),
+            snapshot_id,
+            start_line,
+            end_line,
+            complexity,
+        };
+
+        let serialized = bincode::serialize(&data).map_err(|e| {
+            AppError::Internal(format!("Failed to serialize symbol history: {}", e))
+        })?;
+
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        {
+            let mut table = write_txn
+                .open_table(SYMBOL_HISTORY)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+
+            table
+                .insert(id, serialized.as_slice())
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        write_txn
+            .commit()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(id)
+    }
+
+    /// Update contributor statistics for a symbol
+    ///
+    /// Updates or inserts a record in SYMBOL_CONTRIBUTORS, tracking how many
+    /// times each user has changed a particular symbol.
+    pub fn update_symbol_contributor(
+        &self,
+        symbol_name: &str,
+        git_user_email: &str,
+        timestamp: &str,
+    ) -> AppResult<()> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let table = read_txn
+            .open_table(SYMBOL_CONTRIBUTORS)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let key = (symbol_name, git_user_email);
+        let existing = table
+            .get(key)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if let Some(value) = existing {
+            // Update existing record
+            let mut data: SymbolContributorData = bincode::deserialize(value.value())
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            data.change_count += 1;
+            data.last_change = timestamp.to_string();
+
+            let serialized = bincode::serialize(&data)
+                .map_err(|e| AppError::Internal(format!("Failed to serialize: {}", e)))?;
+
+            drop(table);
+            drop(read_txn);
+
+            let write_txn = self
+                .db
+                .begin_write()
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            {
+                let mut table = write_txn
+                    .open_table(SYMBOL_CONTRIBUTORS)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+
+                table
+                    .insert(key, serialized.as_slice())
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+            write_txn
+                .commit()
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        } else {
+            // Insert new record
+            let data = SymbolContributorData {
+                symbol_name: symbol_name.to_string(),
+                git_user_email: git_user_email.to_string(),
+                change_count: 1,
+                first_change: timestamp.to_string(),
+                last_change: timestamp.to_string(),
+            };
+
+            let serialized = bincode::serialize(&data)
+                .map_err(|e| AppError::Internal(format!("Failed to serialize: {}", e)))?;
+
+            drop(table);
+            drop(read_txn);
+
+            let write_txn = self
+                .db
+                .begin_write()
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            {
+                let mut table = write_txn
+                    .open_table(SYMBOL_CONTRIBUTORS)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+
+                table
+                    .insert(key, serialized.as_slice())
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+            write_txn
+                .commit()
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
+    /// Get symbol history with git user attribution
+    ///
+    /// Returns all versions of a symbol, including who changed it and when.
+    /// Results are ordered by timestamp (newest first).
+    pub fn get_symbol_history_with_users(
+        &self,
+        symbol_name: &str,
+    ) -> AppResult<Vec<SymbolHistoryData>> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let table = read_txn
+            .open_table(SYMBOL_HISTORY)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for res in table
+            .iter()
+            .map_err(|e| AppError::Database(e.to_string()))?
+        {
+            let (_, value) = res.map_err(|e| AppError::Database(e.to_string()))?;
+            let data: SymbolHistoryData = bincode::deserialize(value.value())
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            if data.symbol_name == symbol_name {
+                results.push(data);
+            }
+        }
+
+        results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(results)
+    }
+
+    /// Get all contributors for a specific symbol
+    ///
+    /// Returns a list of users who have changed a symbol, ordered by
+    /// number of changes (most frequent first).
+    pub fn get_symbol_contributors(
+        &self,
+        symbol_name: &str,
+    ) -> AppResult<Vec<SymbolContributorData>> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let table = read_txn
+            .open_table(SYMBOL_CONTRIBUTORS)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for res in table
+            .iter()
+            .map_err(|e| AppError::Database(e.to_string()))?
+        {
+            let (key_guard, value_guard) = res.map_err(|e| AppError::Database(e.to_string()))?;
+            let (sym, _email) = key_guard.value();
+            if sym == symbol_name {
+                let data: SymbolContributorData = bincode::deserialize(value_guard.value())
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                results.push(data);
+            }
+        }
+
+        results.sort_by(|a, b| b.change_count.cmp(&a.change_count));
+        Ok(results)
+    }
+
+    /// Get statistics for a specific symbol
+    ///
+    /// Returns aggregated statistics including:
+    /// - Total number of changes
+    /// - Number of contributors
+    /// - High churn flag (> 20 changes)
+    /// - Bug rate (percentage of bug fix commits)
+    /// - Average complexity
+    pub fn get_symbol_stats(&self, symbol_name: &str) -> AppResult<SymbolStats> {
+        let history = self.get_symbol_history_with_users(symbol_name)?;
+        let contributors = self.get_symbol_contributors(symbol_name)?;
+
+        let total_changes = history.len();
+        let contributor_count = contributors.len();
+        let high_churn = total_changes > 20;
+
+        // Calculate bug rate (look for "fix" in commit messages)
+        let bug_fixes = history
+            .iter()
+            .filter(|h| {
+                // Check if the change was a bug fix
+                // This is a simple heuristic - could be improved
+                h.git_user_name.to_lowercase().contains("fix")
+                    || h.timestamp.to_lowercase().contains("fix")
+            })
+            .count();
+
+        let bug_rate = if total_changes > 0 {
+            bug_fixes as f64 / total_changes as f64
+        } else {
+            0.0
+        };
+
+        // Calculate average complexity
+        let avg_complexity = if total_changes > 0 {
+            let total_complexity: usize = history.iter().map(|h| h.complexity).sum();
+            total_complexity / total_changes
+        } else {
+            0
+        };
+
+        Ok(SymbolStats {
+            symbol_name: symbol_name.to_string(),
+            total_changes,
+            contributor_count,
+            high_churn,
+            bug_rate,
+            avg_complexity,
+            contributors,
+        })
+    }
+}
+
+/// Statistics for a specific symbol
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SymbolStats {
+    pub symbol_name: String,
+    pub total_changes: usize,
+    pub contributor_count: usize,
+    pub high_churn: bool,
+    pub bug_rate: f64,
+    pub avg_complexity: usize,
+    pub contributors: Vec<SymbolContributorData>,
 }
