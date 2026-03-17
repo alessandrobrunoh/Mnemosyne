@@ -1,7 +1,9 @@
 use anyhow::Result;
 use crossterm::style::Stylize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::ui::components::elements::Hyperlink;
 use crate::ui::{DiffBar, KeyHint, Layout, List, PaginationInfo, Renderable, Table};
 use mnem_core::protocol::SnapshotInfo;
 
@@ -13,6 +15,8 @@ pub struct Timeline {
     pub target_file: Option<String>,
     pub limit: usize,
     pub page: usize,
+    pub snapshot_links: HashMap<String, String>,
+    pub ide: Option<mnem_core::config::Ide>,
 }
 
 impl Timeline {
@@ -29,7 +33,19 @@ impl Timeline {
             target_file,
             limit: 20,
             page: 1,
+            snapshot_links: HashMap::new(),
+            ide: None,
         }
+    }
+
+    pub fn with_links(mut self, links: HashMap<String, String>) -> Self {
+        self.snapshot_links = links;
+        self
+    }
+
+    pub fn with_ide(mut self, ide: mnem_core::config::Ide) -> Self {
+        self.ide = Some(ide);
+        self
     }
 
     fn format_time(timestamp: &str) -> String {
@@ -82,7 +98,19 @@ impl Renderable for Timeline {
 
         for (idx, snap) in paged_items.iter().enumerate() {
             let _global_idx = offset + idx + 1;
-            let hash = snap.content_hash.get(0..7).unwrap_or("unknown");
+            let hash_short = snap.content_hash.get(0..7).unwrap_or("unknown");
+
+            // Use hyperlink if we have a temporary file path and IDE configured
+            let hash_display = if let Some(path) = self.snapshot_links.get(&snap.content_hash) {
+                if let Some(ref ide) = self.ide {
+                    Hyperlink::ide_link(hash_short, path, ide)
+                } else {
+                    Hyperlink::file_link(hash_short, path)
+                }
+            } else {
+                hash_short.to_string()
+            };
+
             let time = Self::format_time(&snap.timestamp);
             let is_latest = self.page == 1 && idx == 0;
 
@@ -158,7 +186,7 @@ impl Renderable for Timeline {
                 meta
             };
 
-            layout.graph_node(hash, &display_meta, is_latest, &time, Some(icon), color);
+            layout.graph_node(&hash_display, &display_meta, is_latest, &time, Some(icon), color);
         }
 
         // 4. Draw Root (Base)

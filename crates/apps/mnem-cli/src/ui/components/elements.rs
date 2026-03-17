@@ -53,15 +53,49 @@ impl Hyperlink {
     pub fn ide_link(text: &str, file_path: &str, ide: &mnem_core::config::Ide) -> String {
         use mnem_core::config::Ide;
 
-        // Normalize path for URL: convert backslashes to forward slashes
-        let normalized_path = file_path.replace('\\', "/");
+        // Use absolute path for the URL
+        let abs_path = if std::path::Path::new(file_path).is_absolute() {
+            file_path.to_string()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(file_path)
+                .to_string_lossy()
+                .to_string()
+        };
 
-        // Use file:// which opens in default application or the system default
-        // This works better cross-platform than custom URI schemes
+        // Normalize path for URL: convert backslashes to forward slashes for URL format
+        let normalized_path = abs_path.replace('\\', "/");
+
+        // Use native URI schemes where possible for better IDE integration
         let url = match ide {
             Ide::VsCode => format!("vscode://file/{}", normalized_path),
-            Ide::Zed => format!("file:///{}", normalized_path),
-            Ide::ZedPreview => format!("file:///{}", normalized_path),
+            Ide::Zed => format!("zed://file/{}", normalized_path),
+            Ide::ZedPreview => format!("zed-preview://file/{}", normalized_path),
+        };
+
+        // Fallback to file:// if the scheme isn't supported or doesn't work well
+        // Many terminals and OS handlers work best with standard file:// URIs
+        // For VSCode, it handles file:// URIs by default if it's the default handler.
+        Self::new(text, &url)
+    }
+
+    /// Creates a generic file:// link that the OS will handle with the default application
+    pub fn file_link(text: &str, file_path: &str) -> String {
+        let abs_path = if std::path::Path::new(file_path).is_absolute() {
+            file_path.to_string()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(file_path)
+                .to_string_lossy()
+                .to_string()
+        };
+        let normalized_path = abs_path.replace('\\', "/");
+        let url = if cfg!(windows) {
+            format!("file:///{}", normalized_path)
+        } else {
+            format!("file://{}", normalized_path)
         };
         Self::new(text, &url)
     }
