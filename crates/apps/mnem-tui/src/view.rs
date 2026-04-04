@@ -69,11 +69,26 @@ fn render_toast(f: &mut Frame, message: &str, state: &crate::app::AppState) {
         text::{Line, Span},
         widgets::{Block, Borders, Paragraph},
     };
+
+    // Extra horizontal padding inside the toast (icon + spaces on each side)
+    const TOAST_PADDING: u16 = 16;
+    // Vertical offset from the bottom of the frame (height + 1 for the border row)
+    const TOAST_BOTTOM_OFFSET: u16 = 4;
+    // Minimum frame margin to keep the toast from touching screen edges
+    const TOAST_FRAME_MARGIN: u16 = 4;
+    // Height of the toast widget (content line + top/bottom border)
+    const TOAST_HEIGHT: u16 = 3;
+
     let frame_width = f.size().width;
-    let toast_width = (message.len() as u16 + 16).min(frame_width.saturating_sub(4));
+    let toast_width = (message.len() as u16 + TOAST_PADDING)
+        .min(frame_width.saturating_sub(TOAST_FRAME_MARGIN));
     let toast_x = (frame_width.saturating_sub(toast_width)) / 2;
-    let toast_area =
-        ratatui::layout::Rect::new(toast_x, f.size().height.saturating_sub(4), toast_width, 3);
+    let toast_area = ratatui::layout::Rect::new(
+        toast_x,
+        f.size().height.saturating_sub(TOAST_BOTTOM_OFFSET),
+        toast_width,
+        TOAST_HEIGHT,
+    );
     let text = Paragraph::new(Line::from(vec![
         Span::styled(
             " 󰍡 ",

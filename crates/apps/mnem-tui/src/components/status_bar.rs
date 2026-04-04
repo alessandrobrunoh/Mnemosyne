@@ -2,7 +2,7 @@ use crate::app::{AppState, Focus, ViewState};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -51,7 +51,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let help_text_cow = std::borrow::Cow::from(help_text);
 
     let (mode_label, mode_bg) = if state.input_mode {
-        (" INSERT ", Color::Rgb(80, 180, 120))
+        // Use theme success color for INSERT mode to clearly differentiate from NORMAL
+        (" INSERT ", theme.success)
     } else {
         (" NORMAL ", theme.accent)
     };

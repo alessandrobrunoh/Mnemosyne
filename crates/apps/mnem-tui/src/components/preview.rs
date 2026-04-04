@@ -15,7 +15,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
     let lang = state.current_lang.as_deref().unwrap_or("Plain Text");
 
     let total_lines = state.cached_diff.len();
-    let scroll_line = state.scroll_offset as usize;
+    let scroll_start_line = state.scroll_offset as usize;
 
     let mut title_spans = vec![
         Span::raw(" DIFF — "),
@@ -50,7 +50,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
 
     if total_lines > 0 {
         title_spans.push(Span::styled(
-            format!(" {}:{} ", scroll_line + 1, total_lines),
+            format!(" {}:{} ", scroll_start_line + 1, total_lines),
             ratatui::style::Style::default().fg(theme.text_dim),
         ));
     } else {
