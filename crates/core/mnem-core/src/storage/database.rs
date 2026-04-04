@@ -1,5 +1,6 @@
 use crate::error::{AppError, AppResult};
-use crate::models::{FileEntry, SemanticSymbol, Session, Snapshot, SymbolReference};
+use crate::models::{EnrichedSemanticSymbol, FileEntry, SemanticSymbol, Session, Snapshot, SymbolReference};
+use crate::storage::semantic_enrichment::SymbolEnrichment;
 use redb::{Database as Redb, ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -100,6 +101,17 @@ struct SymbolData {
     start_byte: usize,
     end_byte: usize,
     parent_id: Option<i64>,
+    /// Function/definition signature (header without body block).
+    /// Uses `#[serde(default)]` so records written before this field was added
+    /// still deserialise successfully.
+    #[serde(default)]
+    signature: Option<String>,
+    /// Leading doc-comment with markers stripped.
+    #[serde(default)]
+    docstring: Option<String>,
+    /// McCabe cyclomatic complexity (1 + branch count).
+    #[serde(default)]
+    cyclomatic_complexity: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -135,7 +147,15 @@ pub struct SymbolHistoryData {
     pub snapshot_id: i64,
     pub start_line: usize,
     pub end_line: usize,
+    /// Cyclomatic complexity (previously a trivial line-count; now the real
+    /// McCabe metric produced by [`crate::storage::semantic_enrichment`]).
     pub complexity: usize,
+    /// Function/definition signature (header without body block).
+    #[serde(default)]
+    pub signature: Option<String>,
+    /// Leading doc-comment with markers stripped.
+    #[serde(default)]
+    pub docstring: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1336,6 +1356,17 @@ impl Database {
     }
 
     pub fn insert_symbol(&self, symbol: &SemanticSymbol) -> AppResult<i64> {
+        self.insert_symbol_with_enrichment(symbol, None)
+    }
+
+    /// Insert a symbol together with optional enrichment data (signature,
+    /// docstring, cyclomatic complexity) produced by
+    /// [`crate::storage::semantic_enrichment::SemanticEnricher`].
+    pub fn insert_symbol_with_enrichment(
+        &self,
+        symbol: &SemanticSymbol,
+        enrichment: Option<&SymbolEnrichment>,
+    ) -> AppResult<i64> {
         let id = self.next_id("symbol_id")?;
         let name_id = self.intern_string(&symbol.name)?;
         let kind_id = self.intern_string(&symbol.kind)?;
@@ -1365,6 +1396,11 @@ impl Database {
                 start_byte: symbol.start_byte,
                 end_byte: symbol.end_byte,
                 parent_id: symbol.parent_id,
+                signature: enrichment.and_then(|e| e.signature.clone()),
+                docstring: enrichment.and_then(|e| e.docstring.clone()),
+                cyclomatic_complexity: enrichment
+                    .map(|e| e.cyclomatic_complexity)
+                    .unwrap_or(0),
             };
             let bytes = bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
             table
@@ -1764,6 +1800,119 @@ impl Database {
                     start_byte: data.start_byte,
                     end_byte: data.end_byte,
                     parent_id: data.parent_id,
+                });
+            }
+            if results.len() >= 100 {
+                break;
+            }
+        }
+        Ok(results)
+    }
+
+    /// Like [`Self::get_symbols_for_snapshot`] but returns
+    /// [`EnrichedSemanticSymbol`] records that include the stored signature,
+    /// docstring, and cyclomatic-complexity values.
+    pub fn get_enriched_symbols_for_snapshot(
+        &self,
+        snapshot_id: i64,
+    ) -> AppResult<Vec<EnrichedSemanticSymbol>> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let table = read_txn
+            .open_table(SYMBOLS)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let mut results = Vec::new();
+        for res in table
+            .iter()
+            .map_err(|e| AppError::Database(e.to_string()))?
+        {
+            let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
+            let data: SymbolData =
+                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            if data.snapshot_id == snapshot_id {
+                let name = self.lookup_string(data.name_id)?;
+                let kind = self.lookup_string(data.kind_id)?;
+                let scope = if let Some(sid) = data.scope_id {
+                    Some(self.lookup_string(sid)?)
+                } else {
+                    None
+                };
+                results.push(EnrichedSemanticSymbol {
+                    symbol: SemanticSymbol {
+                        id: data.id,
+                        name,
+                        kind,
+                        scope,
+                        snapshot_id: data.snapshot_id,
+                        chunk_hash: data.chunk_hash,
+                        structural_hash: data.structural_hash,
+                        start_line: data.start_line,
+                        end_line: data.end_line,
+                        start_byte: data.start_byte,
+                        end_byte: data.end_byte,
+                        parent_id: data.parent_id,
+                    },
+                    signature: data.signature,
+                    docstring: data.docstring,
+                    cyclomatic_complexity: data.cyclomatic_complexity.max(1),
+                });
+            }
+        }
+        results.sort_by_key(|s| s.symbol.start_byte);
+        Ok(results)
+    }
+
+    /// Like [`Self::find_symbols_by_name`] but returns
+    /// [`EnrichedSemanticSymbol`] records including signature, docstring, and
+    /// cyclomatic-complexity values.
+    pub fn find_enriched_symbols_by_name(
+        &self,
+        query: &str,
+    ) -> AppResult<Vec<EnrichedSemanticSymbol>> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let table = read_txn
+            .open_table(SYMBOLS)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let mut results = Vec::new();
+        let query_lower = query.to_lowercase();
+        for res in table
+            .iter()
+            .map_err(|e| AppError::Database(e.to_string()))?
+        {
+            let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
+            let data: SymbolData =
+                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            let name = self.lookup_string(data.name_id)?;
+            if name.to_lowercase().contains(&query_lower) {
+                let kind = self.lookup_string(data.kind_id)?;
+                let scope = if let Some(sid) = data.scope_id {
+                    Some(self.lookup_string(sid)?)
+                } else {
+                    None
+                };
+                results.push(EnrichedSemanticSymbol {
+                    symbol: SemanticSymbol {
+                        id: data.id,
+                        name,
+                        kind,
+                        scope,
+                        snapshot_id: data.snapshot_id,
+                        chunk_hash: data.chunk_hash,
+                        structural_hash: data.structural_hash,
+                        start_line: data.start_line,
+                        end_line: data.end_line,
+                        start_byte: data.start_byte,
+                        end_byte: data.end_byte,
+                        parent_id: data.parent_id,
+                    },
+                    signature: data.signature,
+                    docstring: data.docstring,
+                    cyclomatic_complexity: data.cyclomatic_complexity.max(1),
                 });
             }
             if results.len() >= 100 {
@@ -2205,6 +2354,40 @@ impl Database {
         end_line: usize,
         complexity: usize,
     ) -> AppResult<u64> {
+        self.insert_symbol_history_enriched(
+            symbol_name,
+            symbol_kind,
+            structural_hash,
+            content_hash,
+            git_user_name,
+            git_user_email,
+            timestamp,
+            snapshot_id,
+            start_line,
+            end_line,
+            complexity,
+            None,
+        )
+    }
+
+    /// Insert a symbol history record together with optional enrichment data
+    /// (signature, docstring, real cyclomatic complexity).
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_symbol_history_enriched(
+        &self,
+        symbol_name: &str,
+        symbol_kind: &str,
+        structural_hash: &str,
+        content_hash: &str,
+        git_user_name: &str,
+        git_user_email: &str,
+        timestamp: &str,
+        snapshot_id: i64,
+        start_line: usize,
+        end_line: usize,
+        complexity: usize,
+        enrichment: Option<&SymbolEnrichment>,
+    ) -> AppResult<u64> {
         let id = self.next_id("symbol_history_id")?;
         let data = SymbolHistoryData {
             id,
@@ -2219,6 +2402,8 @@ impl Database {
             start_line,
             end_line,
             complexity,
+            signature: enrichment.and_then(|e| e.signature.clone()),
+            docstring: enrichment.and_then(|e| e.docstring.clone()),
         };
 
         let serialized = bincode::serialize(&data).map_err(|e| {

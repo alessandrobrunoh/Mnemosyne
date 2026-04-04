@@ -455,6 +455,7 @@ temp/
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 use crate::semantic::diff::SemanticDiffer;
+                use crate::storage::semantic_enrichment::SemanticEnricher;
                 if let Ok(mut parser) = SemanticParser::new() {
                     if let Ok((symbols, references)) =
                         parser.parse_semantic_data(&content, &ext, snapshot_id, Some(&path_str))
@@ -500,12 +501,23 @@ temp/
 
                         let mut symbols_to_save = Vec::new();
                         if should_save_symbols {
+                            // Compute Tree-sitter enrichment (signature, docstring, cyclomatic
+                            // complexity) for all symbols in one pass.
+                            let ranges: Vec<(usize, usize)> = symbols
+                                .iter()
+                                .map(|s| (s.start_byte, s.end_byte))
+                                .collect();
+                            let enrichments =
+                                SemanticEnricher::enrich(&content, &ext, &ranges);
+
                             // We cannot easily use a stack with parent_id if we want to batch perfectly,
                             // but we can compute the tree structure here and then batch the list.
                             // For simplicity, let's just collect them.
                             let mut parent_stack: Vec<(usize, i64)> = Vec::new();
 
-                            for mut symbol in symbols {
+                            for (mut symbol, enrichment) in
+                                symbols.into_iter().zip(enrichments.iter())
+                            {
                                 while let Some((parent_end, _)) = parent_stack.last() {
                                     if symbol.start_byte >= *parent_end {
                                         parent_stack.pop();
@@ -529,17 +541,18 @@ temp/
                                 // or compute the IDs locally. redb uses u64 IDs we generate.
                                 // Let's keep the sequential insert for symbols to maintain parent_id integrity,
                                 // but batch the rest.
-                                if let Ok(db_id) = db.insert_symbol(&symbol) {
+                                if let Ok(db_id) =
+                                    db.insert_symbol_with_enrichment(&symbol, Some(enrichment))
+                                {
                                     parent_stack.push((symbol.end_byte, db_id));
                                     symbol.id = db_id;
                                     symbols_to_save.push(symbol.clone());
 
-                                    // Calculate complexity (simple metric: lines of code)
-                                    let complexity =
-                                        symbol.end_line.saturating_sub(symbol.start_line);
+                                    // Use real cyclomatic complexity instead of the trivial line-count.
+                                    let complexity = enrichment.cyclomatic_complexity.max(1);
 
-                                    // Insert into symbol history with git user attribution
-                                    let _ = db.insert_symbol_history(
+                                    // Insert into symbol history with git user attribution and enrichment.
+                                    let _ = db.insert_symbol_history_enriched(
                                         &symbol.name,
                                         &symbol.kind,
                                         &symbol.structural_hash,
@@ -551,6 +564,7 @@ temp/
                                         symbol.start_line,
                                         symbol.end_line,
                                         complexity,
+                                        Some(enrichment),
                                     );
 
                                     // Update contributor statistics
@@ -1066,6 +1080,15 @@ temp/
 
     pub fn get_symbols(&self, snapshot_id: i64) -> AppResult<Vec<crate::models::SemanticSymbol>> {
         self.db.get_symbols_for_snapshot(snapshot_id)
+    }
+
+    /// Returns enriched symbols (with signature, docstring, and cyclomatic
+    /// complexity) for the given snapshot.
+    pub fn get_enriched_symbols(
+        &self,
+        snapshot_id: i64,
+    ) -> AppResult<Vec<crate::models::EnrichedSemanticSymbol>> {
+        self.db.get_enriched_symbols_for_snapshot(snapshot_id)
     }
 
     pub fn get_file_info(&self, file_path: &str) -> AppResult<crate::protocol::FileInfoResponse> {

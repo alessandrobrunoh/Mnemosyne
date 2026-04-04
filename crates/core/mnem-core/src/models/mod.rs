@@ -1,6 +1,21 @@
 pub use semantic_delta_protocol::models::{
     Chunk, RecordKind, SemanticRecord, SemanticSymbol, SymbolReference,
 };
+
+/// A [`SemanticSymbol`] enriched with additional structural information
+/// extracted from the Tree-sitter AST by [`crate::storage::semantic_enrichment::SemanticEnricher`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct EnrichedSemanticSymbol {
+    /// The base symbol metadata (name, kind, scope, hashes, byte offsets, …).
+    #[serde(flatten)]
+    pub symbol: SemanticSymbol,
+    /// The function / definition signature without the body block.
+    pub signature: Option<String>,
+    /// Leading doc-comment stripped of comment markers.
+    pub docstring: Option<String>,
+    /// McCabe cyclomatic complexity (1 + number of decision-point nodes).
+    pub cyclomatic_complexity: usize,
+}
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
