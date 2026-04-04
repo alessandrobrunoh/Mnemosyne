@@ -257,6 +257,14 @@ impl Database {
                 meta.insert("string_id", 0)
                     .map_err(|e| AppError::Database(e.to_string()))?;
             }
+            if meta
+                .get("symbol_history_id")
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .is_none()
+            {
+                meta.insert("symbol_history_id", 0)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
         }
         write_txn
             .commit()
@@ -289,25 +297,67 @@ impl Database {
         Ok(next)
     }
 
-    fn intern_string(&self, s: &str) -> AppResult<u32> {
-        let read_txn = self
-            .db
-            .begin_read()
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        let index = read_txn
-            .open_table(STRING_INDEX)
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        if let Some(id) = index
-            .get(s)
-            .map_err(|e| AppError::Database(e.to_string()))?
-        {
-            return Ok(id.value());
+    /// Reserve `count` consecutive IDs for `key` in a single write transaction.
+    ///
+    /// Returns the first ID in the reserved range.  Callers assign IDs as
+    /// `first`, `first + 1`, …, `first + count - 1`.  This is far cheaper
+    /// than calling `next_id` once per item, because it uses a single write
+    /// transaction instead of N separate ones.
+    fn reserve_ids(&self, key: &str, count: usize) -> AppResult<u64> {
+        if count == 0 {
+            return Ok(1);
         }
-        drop(read_txn);
         let write_txn = self
             .db
             .begin_write()
             .map_err(|e| AppError::Database(e.to_string()))?;
+        let first = {
+            let mut meta = write_txn
+                .open_table(METADATA)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let current = meta
+                .get(key)
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .map(|v| v.value())
+                .unwrap_or(0);
+            let first = current + 1;
+            meta.insert(key, current + count as u64)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            first
+        };
+        write_txn
+            .commit()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(first)
+    }
+
+    fn intern_string(&self, s: &str) -> AppResult<u32> {
+        // Use a single write transaction to atomically check-and-insert,
+        // eliminating the prior read→write TOCTOU window and reducing the
+        // transaction count from 2 to 1.
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // Check whether the string already exists within the write transaction.
+        let existing: Option<u32> = {
+            let index = write_txn
+                .open_table(STRING_INDEX)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            index
+                .get(s)
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .map(|v| v.value())
+        };
+
+        if let Some(id) = existing {
+            // Nothing to write; drop the write transaction (implicit rollback).
+            drop(write_txn);
+            return Ok(id);
+        }
+
+        // String is new — allocate an ID and persist all three records atomically.
         let id = {
             let mut meta = write_txn
                 .open_table(METADATA)
@@ -320,20 +370,24 @@ impl Database {
             let next = current + 1;
             meta.insert("string_id", next as u64)
                 .map_err(|e| AppError::Database(e.to_string()))?;
+            next
+        };
+        {
             let mut strings = write_txn
                 .open_table(STRINGS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
+            strings
+                .insert(id, s)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        {
             let mut index = write_txn
                 .open_table(STRING_INDEX)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            strings
-                .insert(next, s)
-                .map_err(|e| AppError::Database(e.to_string()))?;
             index
-                .insert(s, next)
+                .insert(s, id)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            next
-        };
+        }
         write_txn
             .commit()
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -353,6 +407,60 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
             .ok_or_else(|| AppError::Internal(format!("String ID {} not found", id)))?;
         Ok(s.value().to_string())
+    }
+
+    /// Hydrate a [`Snapshot`] from its compact on-disk representation.
+    ///
+    /// Centralises the repeated pattern of resolving interned string IDs for
+    /// `file_path` and `git_branch` that previously appeared verbatim in
+    /// every query method.
+    fn build_snapshot(&self, data: SnapshotData) -> AppResult<Snapshot> {
+        let file_path = self.lookup_string(data.file_path_id)?;
+        let git_branch = if let Some(bid) = data.git_branch_id {
+            Some(self.lookup_string(bid)?)
+        } else {
+            None
+        };
+        Ok(Snapshot {
+            id: data.id,
+            file_path,
+            timestamp: data.timestamp,
+            content_hash: data.content_hash,
+            git_branch,
+            session_id: data.session_id,
+            commit_hash: data.commit_hash,
+            commit_message: data.commit_message,
+            checkpoint_name: data.checkpoint_name,
+        })
+    }
+
+    /// Hydrate a [`SemanticSymbol`] from its compact on-disk representation.
+    ///
+    /// Centralises the repeated pattern of resolving interned string IDs for
+    /// `name`, `kind`, and optional `scope` that previously appeared verbatim
+    /// in every symbol query method.
+    fn build_symbol(&self, data: SymbolData) -> AppResult<SemanticSymbol> {
+        let name = self.lookup_string(data.name_id)?;
+        let kind = self.lookup_string(data.kind_id)?;
+        let scope = if let Some(sid) = data.scope_id {
+            Some(self.lookup_string(sid)?)
+        } else {
+            None
+        };
+        Ok(SemanticSymbol {
+            id: data.id,
+            name,
+            kind,
+            scope,
+            snapshot_id: data.snapshot_id,
+            chunk_hash: data.chunk_hash,
+            structural_hash: data.structural_hash,
+            start_line: data.start_line,
+            end_line: data.end_line,
+            start_byte: data.start_byte,
+            end_byte: data.end_byte,
+            parent_id: data.parent_id,
+        })
     }
 
     pub fn get_git_commit(&self, hash: &str) -> AppResult<Option<(String, String, String)>> {
@@ -535,35 +643,16 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            // Skip records that can't be parsed (old format or corrupted)
-            let Ok(data) = bincode::deserialize::<SnapshotData>(v.value()) else {
+            let Some(data) = deserialize_snapshot_data(v.value()) else {
                 continue;
             };
-            // Skip records with invalid file_path_id
-            if data.file_path_id == 0 {
-                continue;
-            }
             let path = match self.lookup_string(data.file_path_id) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
             if path.contains(file_path) {
-                let branch = if let Some(bid) = data.git_branch_id {
-                    Some(self.lookup_string(bid)?)
-                } else {
-                    None
-                };
-                history.push(Snapshot {
-                    id: data.id,
-                    file_path: path,
-                    timestamp: data.timestamp,
-                    content_hash: data.content_hash,
-                    git_branch: branch,
-                    session_id: data.session_id,
-                    commit_hash: data.commit_hash,
-                    commit_message: data.commit_message,
-                    checkpoint_name: data.checkpoint_name,
-                });
+                let snap = self.build_snapshot(data)?;
+                history.push(snap);
             }
         }
         history.sort_by(|a, b| b.id.cmp(&a.id));
@@ -587,26 +676,10 @@ impl Database {
             let Some(data) = deserialize_snapshot_data(v.value()) else {
                 continue;
             };
-            let path = match self.lookup_string(data.file_path_id) {
-                Ok(p) => p,
+            match self.build_snapshot(data) {
+                Ok(snap) => history.push(snap),
                 Err(_) => continue,
-            };
-            let branch = if let Some(bid) = data.git_branch_id {
-                Some(self.lookup_string(bid)?)
-            } else {
-                None
-            };
-            history.push(Snapshot {
-                id: data.id,
-                file_path: path,
-                timestamp: data.timestamp,
-                content_hash: data.content_hash,
-                git_branch: branch,
-                session_id: data.session_id,
-                commit_hash: data.commit_hash,
-                commit_message: data.commit_message,
-                checkpoint_name: data.checkpoint_name,
-            });
+            }
         }
         history.sort_by(|a, b| b.id.cmp(&a.id));
         history.truncate(limit);
@@ -627,26 +700,11 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            let Some(data) = deserialize_snapshot_data(v.value()) else {
+                continue;
+            };
             if data.content_hash == content_hash {
-                let path = self.lookup_string(data.file_path_id)?;
-                let branch = if let Some(bid) = data.git_branch_id {
-                    Some(self.lookup_string(bid)?)
-                } else {
-                    None
-                };
-                history.push(Snapshot {
-                    id: data.id,
-                    file_path: path,
-                    timestamp: data.timestamp,
-                    content_hash: data.content_hash,
-                    git_branch: branch,
-                    session_id: data.session_id,
-                    commit_hash: data.commit_hash,
-                    commit_message: data.commit_message,
-                    checkpoint_name: data.checkpoint_name,
-                });
+                history.push(self.build_snapshot(data)?);
             }
         }
         history.sort_by(|a, b| b.id.cmp(&a.id));
@@ -811,8 +869,9 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            let Some(data) = deserialize_snapshot_data(v.value()) else {
+                continue;
+            };
             let entry = files
                 .entry(data.file_path_id)
                 .or_insert_with(|| data.clone());
@@ -822,23 +881,7 @@ impl Database {
         }
         let mut results = Vec::new();
         for (_, data) in files {
-            let path = self.lookup_string(data.file_path_id)?;
-            let branch = if let Some(bid) = data.git_branch_id {
-                Some(self.lookup_string(bid)?)
-            } else {
-                None
-            };
-            results.push(Snapshot {
-                id: data.id,
-                file_path: path,
-                timestamp: data.timestamp,
-                content_hash: data.content_hash,
-                git_branch: branch,
-                session_id: data.session_id,
-                commit_hash: data.commit_hash,
-                commit_message: data.commit_message,
-                checkpoint_name: data.checkpoint_name,
-            });
+            results.push(self.build_snapshot(data)?);
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         Ok(results)
@@ -859,8 +902,9 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (_, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            let Some(data) = deserialize_snapshot_data(v.value()) else {
+                continue;
+            };
             let entry = deduplicated
                 .entry(data.content_hash.clone())
                 .or_insert_with(|| data.clone());
@@ -870,23 +914,7 @@ impl Database {
         }
         let mut results = Vec::new();
         for (_, data) in deduplicated {
-            let path = self.lookup_string(data.file_path_id)?;
-            let branch = if let Some(bid) = data.git_branch_id {
-                Some(self.lookup_string(bid)?)
-            } else {
-                None
-            };
-            results.push(Snapshot {
-                id: data.id,
-                file_path: path,
-                timestamp: data.timestamp,
-                content_hash: data.content_hash,
-                git_branch: branch,
-                session_id: data.session_id,
-                commit_hash: data.commit_hash,
-                commit_message: data.commit_message,
-                checkpoint_name: data.checkpoint_name,
-            });
+            results.push(self.build_snapshot(data)?);
         }
         results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         Ok(results)
@@ -930,50 +958,57 @@ impl Database {
             let mut symbols = write_txn
                 .open_table(SYMBOLS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            let mut to_delete = Vec::new();
-            for res in snapshots
+
+            // Collect all snapshot IDs eligible for pruning in a single pass.
+            let to_delete: Vec<u64> = snapshots
                 .iter()
                 .map_err(|e| AppError::Database(e.to_string()))?
-            {
-                let (id, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-                let data: SnapshotData = bincode::deserialize(v.value())
-                    .map_err(|e| AppError::Internal(e.to_string()))?;
-                if data.timestamp < cutoff && data.commit_hash.is_none() {
-                    to_delete.push(id.value());
-                }
-            }
+                .filter_map(|res| {
+                    let (id, v) = res.ok()?;
+                    let data: SnapshotData = bincode::deserialize(v.value()).ok()?;
+                    if data.timestamp < cutoff && data.commit_hash.is_none() {
+                        Some(id.value())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             for id in &to_delete {
                 snapshots
                     .remove(id)
                     .map_err(|e| AppError::Database(e.to_string()))?;
                 count += 1;
-                let mut chunk_keys = Vec::new();
-                for res in snapshot_chunks
-                    .iter()
+
+                // Use a range query on the composite key (snapshot_id, position)
+                // instead of a full table scan — O(log n + k) instead of O(n).
+                let chunk_keys: Vec<(u64, u32)> = snapshot_chunks
+                    .range((*id, 0u32)..=(*id, u32::MAX))
                     .map_err(|e| AppError::Database(e.to_string()))?
-                {
-                    let (key, _) = res.map_err(|e| AppError::Database(e.to_string()))?;
-                    if key.value().0 == *id {
-                        chunk_keys.push(key.value());
-                    }
-                }
+                    .filter_map(|res| res.ok().map(|(k, _)| k.value()))
+                    .collect();
                 for k in chunk_keys {
                     snapshot_chunks
                         .remove(k)
                         .map_err(|e| AppError::Database(e.to_string()))?;
                 }
-                let mut sym_keys = Vec::new();
-                for res in symbols
+
+                // Symbols don't have a composite key indexed by snapshot_id, so
+                // we still need a filtered scan; but we collect all symbols to
+                // remove across all pruned snapshots in one pass below.
+                let sym_keys: Vec<u64> = symbols
                     .iter()
                     .map_err(|e| AppError::Database(e.to_string()))?
-                {
-                    let (key, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-                    let sym: SymbolData = bincode::deserialize(v.value())
-                        .map_err(|e| AppError::Internal(e.to_string()))?;
-                    if sym.snapshot_id == *id as i64 {
-                        sym_keys.push(key.value());
-                    }
-                }
+                    .filter_map(|res| {
+                        let (key, v) = res.ok()?;
+                        let sym: SymbolData = bincode::deserialize(v.value()).ok()?;
+                        if sym.snapshot_id == *id as i64 {
+                            Some(key.value())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 for k in sym_keys {
                     symbols
                         .remove(k)
@@ -1020,38 +1055,23 @@ impl Database {
                 .open_table(SNAPSHOTS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
             count = s.len().map_err(|e| AppError::Database(e.to_string()))? as usize;
-            let snapshot_keys: Vec<u64> = s
-                .iter()
-                .map_err(|e| AppError::Database(e.to_string()))?
-                .filter_map(|res| res.ok().map(|(k, _)| k.value()))
-                .collect();
-            for k in snapshot_keys {
-                s.remove(k).map_err(|e| AppError::Database(e.to_string()))?;
-            }
+            // Drain by retaining nothing — single pass, no intermediate Vec.
+            s.retain(|_, _| false)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        {
             let mut sc = write_txn
                 .open_table(SNAPSHOT_CHUNKS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            let chunk_keys: Vec<(u64, u32)> = sc
-                .iter()
-                .map_err(|e| AppError::Database(e.to_string()))?
-                .filter_map(|res| res.ok().map(|(k, _)| k.value()))
-                .collect();
-            for k in chunk_keys {
-                sc.remove(k)
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-            }
+            sc.retain(|_, _| false)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        {
             let mut sym = write_txn
                 .open_table(SYMBOLS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            let symbol_keys: Vec<u64> = sym
-                .iter()
-                .map_err(|e| AppError::Database(e.to_string()))?
-                .filter_map(|res| res.ok().map(|(k, _)| k.value()))
-                .collect();
-            for k in symbol_keys {
-                sym.remove(k)
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-            }
+            sym.retain(|_, _| false)
+                .map_err(|e| AppError::Database(e.to_string()))?;
         }
         write_txn
             .commit()
@@ -1077,23 +1097,7 @@ impl Database {
         {
             let data: SnapshotData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
-            let path = self.lookup_string(data.file_path_id)?;
-            let branch = if let Some(bid) = data.git_branch_id {
-                Some(self.lookup_string(bid)?)
-            } else {
-                None
-            };
-            Ok(Some(Snapshot {
-                id: data.id,
-                file_path: path,
-                timestamp: data.timestamp,
-                content_hash: data.content_hash,
-                git_branch: branch,
-                session_id: data.session_id,
-                commit_hash: data.commit_hash,
-                commit_message: data.commit_message,
-                checkpoint_name: data.checkpoint_name,
-            }))
+            Ok(Some(self.build_snapshot(data)?))
         } else {
             Ok(None)
         }
@@ -1513,6 +1517,14 @@ impl Database {
         deltas: Vec<crate::models::SemanticRecord>,
         references: Vec<SymbolReference>,
     ) -> AppResult<()> {
+        if symbols.is_empty() && deltas.is_empty() && references.is_empty() {
+            return Ok(());
+        }
+
+        // Phase 1: intern all required strings.  Each call opens at most one
+        // write transaction (and skips the write entirely when the string is
+        // already known), so the total cost is proportional to the number of
+        // *new* strings rather than the total count of items.
         for s in &symbols {
             self.intern_string(&s.name)?;
             self.intern_string(&s.kind)?;
@@ -1529,15 +1541,110 @@ impl Database {
         for r in &references {
             self.intern_string(&r.symbol_name)?;
         }
-        for s in symbols {
-            self.insert_symbol(&s)?;
+
+        // Phase 2: reserve all IDs in a single write transaction instead of
+        // one transaction per item (3 txns vs. N+M+P txns).
+        let sym_first = self.reserve_ids("symbol_id", symbols.len())?;
+        let delta_first = self.reserve_ids("delta_id", deltas.len())?;
+        let ref_first = self.reserve_ids("reference_id", references.len())?;
+
+        // Phase 3: write every record in a single atomic write transaction.
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        {
+            let mut sym_table = write_txn
+                .open_table(SYMBOLS)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for (i, s) in symbols.iter().enumerate() {
+                let id = sym_first + i as u64;
+                let name_id = self.intern_string(&s.name)?;
+                let kind_id = self.intern_string(&s.kind)?;
+                let scope_id = if let Some(sc) = &s.scope {
+                    Some(self.intern_string(sc)?)
+                } else {
+                    None
+                };
+                let data = SymbolData {
+                    id: id as i64,
+                    name_id,
+                    kind_id,
+                    scope_id,
+                    snapshot_id: s.snapshot_id,
+                    chunk_hash: s.chunk_hash.clone(),
+                    structural_hash: s.structural_hash.clone(),
+                    start_line: s.start_line,
+                    end_line: s.end_line,
+                    start_byte: s.start_byte,
+                    end_byte: s.end_byte,
+                    parent_id: s.parent_id,
+                };
+                let bytes =
+                    bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
+                sym_table
+                    .insert(id, &*bytes)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
         }
-        for d in deltas {
-            self.insert_symbol_delta(&d)?;
+        {
+            let mut delta_table = write_txn
+                .open_table(SYMBOL_DELTAS)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for (i, d) in deltas.iter().enumerate() {
+                let id = delta_first + i as u64;
+                let symbol_name_id = self.intern_string(&d.symbol_name)?;
+                let new_name_id = if let Some(n) = &d.new_name {
+                    Some(self.intern_string(n)?)
+                } else {
+                    None
+                };
+                let kind_str = match d.kind {
+                    crate::models::RecordKind::Added => "Added",
+                    crate::models::RecordKind::Modified => "Modified",
+                    crate::models::RecordKind::Deleted => "Deleted",
+                    crate::models::RecordKind::Renamed => "Renamed",
+                };
+                let data = DeltaData {
+                    id: id as i64,
+                    from_snapshot_id: d.from_snapshot_id,
+                    to_snapshot_id: d.to_snapshot_id,
+                    symbol_name_id,
+                    new_name_id,
+                    delta_kind: kind_str.to_string(),
+                    structural_hash: d.structural_hash.clone(),
+                };
+                let bytes =
+                    bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
+                delta_table
+                    .insert(id, &*bytes)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
         }
-        for r in references {
-            self.insert_reference(&r)?;
+        {
+            let mut ref_table = write_txn
+                .open_table(SYMBOL_REFERENCES)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for (i, r) in references.iter().enumerate() {
+                let id = ref_first + i as u64;
+                let symbol_name_id = self.intern_string(&r.symbol_name)?;
+                let data = ReferenceData {
+                    id: id as i64,
+                    symbol_name_id,
+                    snapshot_id: r.snapshot_id,
+                    start_line: r.start_line,
+                    start_byte: r.start_byte,
+                };
+                let bytes =
+                    bincode::serialize(&data).map_err(|e| AppError::Internal(e.to_string()))?;
+                ref_table
+                    .insert(id, &*bytes)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
         }
+        write_txn
+            .commit()
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -1594,44 +1701,8 @@ impl Database {
                 {
                     let snap_data: SnapshotData = bincode::deserialize(sv.value())
                         .map_err(|e| AppError::Internal(e.to_string()))?;
-                    let path = self.lookup_string(snap_data.file_path_id)?;
-                    let branch = if let Some(bid) = snap_data.git_branch_id {
-                        Some(self.lookup_string(bid)?)
-                    } else {
-                        None
-                    };
-                    let snap = Snapshot {
-                        id: snap_data.id,
-                        file_path: path,
-                        timestamp: snap_data.timestamp,
-                        content_hash: snap_data.content_hash,
-                        git_branch: branch,
-                        session_id: snap_data.session_id,
-                        commit_hash: snap_data.commit_hash,
-                        commit_message: snap_data.commit_message,
-                        checkpoint_name: snap_data.checkpoint_name,
-                    };
-                    let name = self.lookup_string(sym_data.name_id)?;
-                    let kind = self.lookup_string(sym_data.kind_id)?;
-                    let scope = if let Some(sid) = sym_data.scope_id {
-                        Some(self.lookup_string(sid)?)
-                    } else {
-                        None
-                    };
-                    let sym = SemanticSymbol {
-                        id: sym_data.id,
-                        name,
-                        kind,
-                        scope,
-                        snapshot_id: sym_data.snapshot_id,
-                        chunk_hash: sym_data.chunk_hash,
-                        structural_hash: sym_data.structural_hash,
-                        start_line: sym_data.start_line,
-                        end_line: sym_data.end_line,
-                        start_byte: sym_data.start_byte,
-                        end_byte: sym_data.end_byte,
-                        parent_id: sym_data.parent_id,
-                    };
+                    let snap = self.build_snapshot(snap_data)?;
+                    let sym = self.build_symbol(sym_data)?;
                     results.push((snap, sym));
                 }
             }
@@ -1657,24 +1728,24 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?
         {
             let (id, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-            let data: SnapshotData =
-                bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
+            let Some(data) = deserialize_snapshot_data(v.value()) else {
+                continue;
+            };
             if data.content_hash == content_hash {
                 snapshot_id = Some(id.value());
                 break;
             }
         }
         if let Some(sid) = snapshot_id {
-            let mut chunks = Vec::new();
-            for res in sc_table
-                .iter()
+            // Use a range query — O(log n + k) instead of a full table scan.
+            let mut chunks: Vec<(u32, String)> = sc_table
+                .range((sid, 0u32)..=(sid, u32::MAX))
                 .map_err(|e| AppError::Database(e.to_string()))?
-            {
-                let (k, v) = res.map_err(|e| AppError::Database(e.to_string()))?;
-                if k.value().0 == sid {
-                    chunks.push((k.value().1, v.value().to_string()));
-                }
-            }
+                .filter_map(|res| {
+                    let (k, v) = res.ok()?;
+                    Some((k.value().1, v.value().to_string()))
+                })
+                .collect();
             chunks.sort_by_key(|a| a.0);
             Ok(chunks.into_iter().map(|(_, h)| h).collect())
         } else {
@@ -1699,27 +1770,7 @@ impl Database {
             let data: SymbolData =
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
             if data.snapshot_id == snapshot_id {
-                let name = self.lookup_string(data.name_id)?;
-                let kind = self.lookup_string(data.kind_id)?;
-                let scope = if let Some(sid) = data.scope_id {
-                    Some(self.lookup_string(sid)?)
-                } else {
-                    None
-                };
-                results.push(SemanticSymbol {
-                    id: data.id,
-                    name,
-                    kind,
-                    scope,
-                    snapshot_id: data.snapshot_id,
-                    chunk_hash: data.chunk_hash,
-                    structural_hash: data.structural_hash,
-                    start_line: data.start_line,
-                    end_line: data.end_line,
-                    start_byte: data.start_byte,
-                    end_byte: data.end_byte,
-                    parent_id: data.parent_id,
-                });
+                results.push(self.build_symbol(data)?);
             }
         }
         results.sort_by_key(|s| s.start_byte);
@@ -1745,26 +1796,7 @@ impl Database {
                 bincode::deserialize(v.value()).map_err(|e| AppError::Internal(e.to_string()))?;
             let name = self.lookup_string(data.name_id)?;
             if name.to_lowercase().contains(&query_lower) {
-                let kind = self.lookup_string(data.kind_id)?;
-                let scope = if let Some(sid) = data.scope_id {
-                    Some(self.lookup_string(sid)?)
-                } else {
-                    None
-                };
-                results.push(SemanticSymbol {
-                    id: data.id,
-                    name,
-                    kind,
-                    scope,
-                    snapshot_id: data.snapshot_id,
-                    chunk_hash: data.chunk_hash,
-                    structural_hash: data.structural_hash,
-                    start_line: data.start_line,
-                    end_line: data.end_line,
-                    start_byte: data.start_byte,
-                    end_byte: data.end_byte,
-                    parent_id: data.parent_id,
-                });
+                results.push(self.build_symbol(data)?);
             }
             if results.len() >= 100 {
                 break;
@@ -2249,88 +2281,58 @@ impl Database {
     ///
     /// Updates or inserts a record in SYMBOL_CONTRIBUTORS, tracking how many
     /// times each user has changed a particular symbol.
+    ///
+    /// Uses a single write transaction for the check-and-update so there is no
+    /// TOCTOU window between reading the current count and persisting the new one.
     pub fn update_symbol_contributor(
         &self,
         symbol_name: &str,
         git_user_email: &str,
         timestamp: &str,
     ) -> AppResult<()> {
-        let read_txn = self
+        let write_txn = self
             .db
-            .begin_read()
+            .begin_write()
             .map_err(|e| AppError::Database(e.to_string()))?;
-        let table = read_txn
-            .open_table(SYMBOL_CONTRIBUTORS)
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        {
+            let mut table = write_txn
+                .open_table(SYMBOL_CONTRIBUTORS)
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let key = (symbol_name, git_user_email);
-        let existing = table
-            .get(key)
-            .map_err(|e| AppError::Database(e.to_string()))?;
+            let key = (symbol_name, git_user_email);
 
-        if let Some(value) = existing {
-            // Update existing record
-            let mut data: SymbolContributorData = bincode::deserialize(value.value())
+            // Read the current record (if any) and decide whether to update or insert
+            // all within the same write transaction — no separate read transaction needed.
+            let existing: Option<SymbolContributorData> = table
+                .get(key)
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .map(|v| bincode::deserialize::<SymbolContributorData>(v.value()))
+                .transpose()
                 .map_err(|e| AppError::Internal(e.to_string()))?;
-            data.change_count += 1;
-            data.last_change = timestamp.to_string();
 
-            let serialized = bincode::serialize(&data)
-                .map_err(|e| AppError::Internal(format!("Failed to serialize: {}", e)))?;
-
-            drop(table);
-            drop(read_txn);
-
-            let write_txn = self
-                .db
-                .begin_write()
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            {
-                let mut table = write_txn
-                    .open_table(SYMBOL_CONTRIBUTORS)
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-
-                table
-                    .insert(key, serialized.as_slice())
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-            }
-            write_txn
-                .commit()
-                .map_err(|e| AppError::Database(e.to_string()))?;
-        } else {
-            // Insert new record
-            let data = SymbolContributorData {
-                symbol_name: symbol_name.to_string(),
-                git_user_email: git_user_email.to_string(),
-                change_count: 1,
-                first_change: timestamp.to_string(),
-                last_change: timestamp.to_string(),
+            let data = if let Some(mut d) = existing {
+                d.change_count += 1;
+                d.last_change = timestamp.to_string();
+                d
+            } else {
+                SymbolContributorData {
+                    symbol_name: symbol_name.to_string(),
+                    git_user_email: git_user_email.to_string(),
+                    change_count: 1,
+                    first_change: timestamp.to_string(),
+                    last_change: timestamp.to_string(),
+                }
             };
 
             let serialized = bincode::serialize(&data)
                 .map_err(|e| AppError::Internal(format!("Failed to serialize: {}", e)))?;
-
-            drop(table);
-            drop(read_txn);
-
-            let write_txn = self
-                .db
-                .begin_write()
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            {
-                let mut table = write_txn
-                    .open_table(SYMBOL_CONTRIBUTORS)
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-
-                table
-                    .insert(key, serialized.as_slice())
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-            }
-            write_txn
-                .commit()
+            table
+                .insert(key, serialized.as_slice())
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
-
+        write_txn
+            .commit()
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
