@@ -303,9 +303,12 @@ impl Database {
     /// `first`, `first + 1`, …, `first + count - 1`.  This is far cheaper
     /// than calling `next_id` once per item, because it uses a single write
     /// transaction instead of N separate ones.
+    ///
+    /// Returns `Ok(0)` when `count == 0`; callers must not use the sentinel
+    /// value, but in practice they never iterate over an empty collection.
     fn reserve_ids(&self, key: &str, count: usize) -> AppResult<u64> {
         if count == 0 {
-            return Ok(1);
+            return Ok(0);
         }
         let write_txn = self
             .db
@@ -1521,34 +1524,62 @@ impl Database {
             return Ok(());
         }
 
-        // Phase 1: intern all required strings.  Each call opens at most one
-        // write transaction (and skips the write entirely when the string is
-        // already known), so the total cost is proportional to the number of
-        // *new* strings rather than the total count of items.
-        for s in &symbols {
-            self.intern_string(&s.name)?;
-            self.intern_string(&s.kind)?;
-            if let Some(sc) = &s.scope {
-                self.intern_string(sc)?;
-            }
+        // Phase 1: intern all required strings and cache the resulting IDs so
+        // that Phase 3 can use them without opening any additional transactions.
+        // Each `intern_string` call opens at most one write transaction and
+        // skips the write entirely when the string is already known.
+        struct SymIds {
+            name_id: u32,
+            kind_id: u32,
+            scope_id: Option<u32>,
         }
-        for d in &deltas {
-            self.intern_string(&d.symbol_name)?;
-            if let Some(n) = &d.new_name {
-                self.intern_string(n)?;
-            }
-        }
-        for r in &references {
-            self.intern_string(&r.symbol_name)?;
+        struct DeltaIds {
+            symbol_name_id: u32,
+            new_name_id: Option<u32>,
         }
 
-        // Phase 2: reserve all IDs in a single write transaction instead of
-        // one transaction per item (3 txns vs. N+M+P txns).
+        let sym_ids: Vec<SymIds> = symbols
+            .iter()
+            .map(|s| {
+                Ok(SymIds {
+                    name_id: self.intern_string(&s.name)?,
+                    kind_id: self.intern_string(&s.kind)?,
+                    scope_id: s
+                        .scope
+                        .as_deref()
+                        .map(|sc| self.intern_string(sc))
+                        .transpose()?,
+                })
+            })
+            .collect::<AppResult<_>>()?;
+
+        let delta_ids: Vec<DeltaIds> = deltas
+            .iter()
+            .map(|d| {
+                Ok(DeltaIds {
+                    symbol_name_id: self.intern_string(&d.symbol_name)?,
+                    new_name_id: d
+                        .new_name
+                        .as_deref()
+                        .map(|n| self.intern_string(n))
+                        .transpose()?,
+                })
+            })
+            .collect::<AppResult<_>>()?;
+
+        let ref_name_ids: Vec<u32> = references
+            .iter()
+            .map(|r| self.intern_string(&r.symbol_name))
+            .collect::<AppResult<_>>()?;
+
+        // Phase 2: reserve all IDs in a single write transaction per counter
+        // instead of one transaction per item (3 txns vs. N+M+P txns).
         let sym_first = self.reserve_ids("symbol_id", symbols.len())?;
         let delta_first = self.reserve_ids("delta_id", deltas.len())?;
         let ref_first = self.reserve_ids("reference_id", references.len())?;
 
-        // Phase 3: write every record in a single atomic write transaction.
+        // Phase 3: write every record in a single atomic write transaction
+        // using the cached string IDs — no additional `intern_string` calls.
         let write_txn = self
             .db
             .begin_write()
@@ -1557,20 +1588,13 @@ impl Database {
             let mut sym_table = write_txn
                 .open_table(SYMBOLS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            for (i, s) in symbols.iter().enumerate() {
+            for (i, (s, ids)) in symbols.iter().zip(sym_ids.iter()).enumerate() {
                 let id = sym_first + i as u64;
-                let name_id = self.intern_string(&s.name)?;
-                let kind_id = self.intern_string(&s.kind)?;
-                let scope_id = if let Some(sc) = &s.scope {
-                    Some(self.intern_string(sc)?)
-                } else {
-                    None
-                };
                 let data = SymbolData {
                     id: id as i64,
-                    name_id,
-                    kind_id,
-                    scope_id,
+                    name_id: ids.name_id,
+                    kind_id: ids.kind_id,
+                    scope_id: ids.scope_id,
                     snapshot_id: s.snapshot_id,
                     chunk_hash: s.chunk_hash.clone(),
                     structural_hash: s.structural_hash.clone(),
@@ -1591,14 +1615,8 @@ impl Database {
             let mut delta_table = write_txn
                 .open_table(SYMBOL_DELTAS)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            for (i, d) in deltas.iter().enumerate() {
+            for (i, (d, ids)) in deltas.iter().zip(delta_ids.iter()).enumerate() {
                 let id = delta_first + i as u64;
-                let symbol_name_id = self.intern_string(&d.symbol_name)?;
-                let new_name_id = if let Some(n) = &d.new_name {
-                    Some(self.intern_string(n)?)
-                } else {
-                    None
-                };
                 let kind_str = match d.kind {
                     crate::models::RecordKind::Added => "Added",
                     crate::models::RecordKind::Modified => "Modified",
@@ -1609,8 +1627,8 @@ impl Database {
                     id: id as i64,
                     from_snapshot_id: d.from_snapshot_id,
                     to_snapshot_id: d.to_snapshot_id,
-                    symbol_name_id,
-                    new_name_id,
+                    symbol_name_id: ids.symbol_name_id,
+                    new_name_id: ids.new_name_id,
                     delta_kind: kind_str.to_string(),
                     structural_hash: d.structural_hash.clone(),
                 };
@@ -1625,12 +1643,13 @@ impl Database {
             let mut ref_table = write_txn
                 .open_table(SYMBOL_REFERENCES)
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            for (i, r) in references.iter().enumerate() {
+            for (i, (r, symbol_name_id)) in
+                references.iter().zip(ref_name_ids.iter()).enumerate()
+            {
                 let id = ref_first + i as u64;
-                let symbol_name_id = self.intern_string(&r.symbol_name)?;
                 let data = ReferenceData {
                     id: id as i64,
-                    symbol_name_id,
+                    symbol_name_id: *symbol_name_id,
                     snapshot_id: r.snapshot_id,
                     start_line: r.start_line,
                     start_byte: r.start_byte,
