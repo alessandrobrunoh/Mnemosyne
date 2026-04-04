@@ -2,7 +2,7 @@ use crate::app::{AppState, ViewState};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -97,7 +97,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" [x!?]", Style::default().fg(Color::Rgb(224, 108, 117))), // GitButler red status
         ]))
         .alignment(ratatui::layout::Alignment::Right)
         .bg(theme.bg);

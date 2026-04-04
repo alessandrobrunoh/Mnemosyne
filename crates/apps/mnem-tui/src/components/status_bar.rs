@@ -2,7 +2,7 @@ use crate::app::{AppState, Focus, ViewState};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -11,34 +11,56 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let theme = &state.theme;
 
     let help_text = match state.view {
-        ViewState::Home | ViewState::History => match state.focus {
-            Focus::Files => {
-                " [Ent] Open  [F] Filter  [B] Branch  [[/]] Resize  [Q] Quit ".to_string()
+        ViewState::Home | ViewState::History => {
+            if state.input_mode {
+                " [Esc] Stop Filtering  [Enter] Confirm ".to_string()
+            } else {
+                match state.focus {
+                    Focus::Files => {
+                        " [↑↓] Navigate  [Enter] Open  [F] Filter  [B] Branch  [Tab] Focus  [Q] Quit ".to_string()
+                    }
+                    Focus::Timeline => {
+                        " [↑↓] Navigate  [V] Compare  [Space] Select Hunk  [Tab] Focus  [Esc] Back ".to_string()
+                    }
+                    Focus::Preview => {
+                        let r_label = if state.selected_hunks.is_empty() {
+                            "Restore File"
+                        } else {
+                            "Restore Hunks"
+                        };
+                        format!(
+                            " [↑↓] Scroll  [Space] Select Hunk  [R] {}  [Tab] Focus  [Esc] Back ",
+                            r_label
+                        )
+                    }
+                }
             }
-            Focus::Timeline => " [P] Preview  [V] Compare  [[/]] Resize  [Esc] Back ".to_string(),
-            Focus::Preview => {
-                let r_label = if state.selected_hunks.is_empty() {
-                    "Restore File"
-                } else {
-                    "Restore Hunks"
-                };
-                format!(
-                    " [Space] Select Hunk  [R] {}  [[/]] Resize  [Esc] Back ",
-                    r_label
-                )
+        }
+        ViewState::Search => {
+            if state.input_mode {
+                " [Esc] Stop Searching  [Enter] Confirm ".to_string()
+            } else {
+                " [/] Search  [↑↓] Navigate  [Enter] View  [Esc] Back ".to_string()
             }
-        },
-        ViewState::Search => " [Ent] View  [Esc] Back ".to_string(),
-        ViewState::Projects => " [D] Unwatch  [Esc] Back ".to_string(),
+        }
+        ViewState::Projects => " [↑↓] Navigate  [D] Unwatch  [Esc] Back ".to_string(),
         ViewState::Statistics => " [R] Refresh  [Esc] Back ".to_string(),
-        ViewState::Settings => " [Ent] Change  [Esc] Back ".to_string(),
+        ViewState::Settings => " [↑↓] Navigate  [Enter] Change  [Esc] Back ".to_string(),
     };
 
     let help_text_cow = std::borrow::Cow::from(help_text);
 
+    let (mode_label, mode_bg) = if state.input_mode {
+        (" INSERT ", Color::Rgb(80, 180, 120))
+    } else {
+        (" NORMAL ", theme.accent)
+    };
+
+    let mode_width = mode_label.len() as u16;
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(20)])
+        .constraints([Constraint::Min(0), Constraint::Length(mode_width)])
         .split(area);
 
     let shortcuts = Paragraph::new(Line::from(vec![Span::styled(
@@ -50,9 +72,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(shortcuts, chunks[0]);
 
     let mode = Paragraph::new(Line::from(vec![Span::styled(
-        " NORMAL ",
+        mode_label,
         Style::default()
-            .bg(theme.accent)
+            .bg(mode_bg)
             .fg(theme.bg)
             .add_modifier(Modifier::BOLD),
     )]))

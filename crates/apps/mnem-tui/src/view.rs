@@ -69,11 +69,14 @@ fn render_toast(f: &mut Frame, message: &str, state: &crate::app::AppState) {
         text::{Line, Span},
         widgets::{Block, Borders, Paragraph},
     };
-    let area = centered_rect(50, 10, f.size());
-    let toast_area = ratatui::layout::Rect::new(area.x, f.size().height - 4, area.width, 3);
+    let frame_width = f.size().width;
+    let toast_width = (message.len() as u16 + 16).min(frame_width.saturating_sub(4));
+    let toast_x = (frame_width.saturating_sub(toast_width)) / 2;
+    let toast_area =
+        ratatui::layout::Rect::new(toast_x, f.size().height.saturating_sub(4), toast_width, 3);
     let text = Paragraph::new(Line::from(vec![
         Span::styled(
-            " INFO ",
+            " 󰍡 ",
             Style::default()
                 .bg(state.theme.accent)
                 .fg(state.theme.bg)
@@ -90,30 +93,7 @@ fn render_toast(f: &mut Frame, message: &str, state: &crate::app::AppState) {
             .border_style(Style::default().fg(state.theme.accent))
             .bg(state.theme.sidebar),
     )
-    .alignment(Alignment::Center);
+    .alignment(Alignment::Left);
     f.render_widget(Clear, toast_area);
     f.render_widget(text, toast_area);
-}
-
-fn centered_rect(
-    percent_x: u16,
-    percent_y: u16,
-    r: ratatui::layout::Rect,
-) -> ratatui::layout::Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }

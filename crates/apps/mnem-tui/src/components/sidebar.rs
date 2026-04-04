@@ -8,6 +8,28 @@ use ratatui::{
     widgets::{List, ListItem},
 };
 
+fn get_file_icon(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        "rs" => "",
+        "toml" | "yaml" | "yml" | "json" => "",
+        "ts" | "tsx" | "js" | "jsx" => "",
+        "py" => "",
+        "go" => "",
+        "c" | "h" | "cpp" | "cc" | "cxx" => "",
+        "java" | "kt" | "kts" => "",
+        "md" | "mdx" => "",
+        "html" | "htm" => "",
+        "css" | "scss" | "sass" => "",
+        "sh" | "bash" | "zsh" => "",
+        "lock" => "",
+        _ => "",
+    }
+}
+
 pub fn render_files(f: &mut Frame, area: Rect, state: &mut AppState) {
     let is_focused = state.focus == Focus::Files;
     let theme = &state.theme;
@@ -34,17 +56,7 @@ pub fn render_files(f: &mut Frame, area: Rect, state: &mut AppState) {
 
             let is_selected = state.files_state.selected() == Some(idx);
 
-            let alphabet = "pqrstuvwxyzkjmn";
-            let alpha_idx = alphabet.chars().nth(idx % alphabet.len()).unwrap();
-            let num_idx = (idx / alphabet.len()) + 1;
-            let shortcut = format!("{}{:01}", alpha_idx, num_idx);
-
-            // Mock status for visual design (A=Add, R=Revise, D=Delete) - audit 5.2
-            let (status_label, status_color) = match idx % 3 {
-                0 => ("R", theme.accent),
-                1 => ("A", theme.success),
-                _ => ("D", ratatui::style::Color::Red),
-            };
+            let icon = get_file_icon(&file.path);
 
             let mut name_style = if is_selected && is_focused {
                 Style::default()
@@ -65,14 +77,8 @@ pub fn render_files(f: &mut Frame, area: Rect, state: &mut AppState) {
 
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!(" {} ", shortcut),
+                    format!(" {} ", icon),
                     Style::default().fg(theme.text_dim),
-                ),
-                Span::styled(
-                    format!("{} ", status_label),
-                    Style::default()
-                        .fg(status_color)
-                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(name.to_string(), name_style),
             ]))

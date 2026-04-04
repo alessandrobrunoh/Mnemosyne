@@ -2,7 +2,7 @@ use crate::app::{AppState, Focus};
 use crate::components::shared::{ComponentFocus, ZedBlock};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, Paragraph},
@@ -30,22 +30,28 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
         },
     );
 
-    let search_text = if state.search_query.is_empty() && !state.input_mode {
-        "Type to search content... (Press /)".to_string()
+    let (search_text, search_style) = if state.search_query.is_empty() && !state.input_mode {
+        (
+            "Press / to start searching...".to_string(),
+            Style::default()
+                .fg(theme.text_dim)
+                .add_modifier(Modifier::ITALIC),
+        )
+    } else if state.input_mode {
+        // Show cursor character at end while in input mode
+        (
+            format!("{}_", state.search_query),
+            Style::default().fg(theme.text_main),
+        )
     } else {
-        state.search_query.clone()
-    };
-
-    let search_style = if state.search_query.is_empty() && !state.input_mode {
-        Style::default()
-            .fg(theme.text_dim)
-            .add_modifier(Modifier::ITALIC)
-    } else {
-        Style::default().fg(theme.text_main)
+        (
+            state.search_query.clone(),
+            Style::default().fg(theme.text_main),
+        )
     };
 
     let p = Paragraph::new(Line::from(vec![
-        Span::styled("   ", Style::default().fg(theme.accent)),
+        Span::styled("   ", Style::default().fg(theme.accent)),
         Span::styled(search_text, search_style),
     ]))
     .block(search_block);
@@ -62,6 +68,24 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
             ComponentFocus::Inactive
         },
     );
+
+    if state.search_results.is_empty() {
+        let empty_msg = if state.search_query.is_empty() {
+            "Enter a query above to search across all tracked files."
+        } else {
+            "No results found. Try a different search term."
+        };
+        let empty = Paragraph::new(Line::from(vec![Span::styled(
+            empty_msg,
+            Style::default()
+                .fg(theme.text_dim)
+                .add_modifier(Modifier::ITALIC),
+        )]))
+        .block(results_block)
+        .alignment(Alignment::Center);
+        f.render_widget(empty, chunks[1]);
+        return;
+    }
 
     let items: Vec<ListItem> = state
         .search_results

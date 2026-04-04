@@ -94,8 +94,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
         .collect();
 
     let list = List::new(items)
-        .block(list_block)
+        .block(list_block.clone())
         .highlight_style(Style::default().bg(theme.sidebar));
 
-    f.render_stateful_widget(list, chunks[1], &mut state.projects_state);
+    if state.projects.is_empty() {
+        let empty = Paragraph::new(Line::from(vec![Span::styled(
+            "No projects are being watched. Use 'mnem track' to add one.",
+            Style::default()
+                .fg(theme.text_dim)
+                .add_modifier(Modifier::ITALIC),
+        )]))
+        .block(list_block)
+        .alignment(ratatui::layout::Alignment::Center);
+        f.render_widget(empty, chunks[1]);
+    } else {
+        f.render_stateful_widget(list, chunks[1], &mut state.projects_state);
+    }
 }

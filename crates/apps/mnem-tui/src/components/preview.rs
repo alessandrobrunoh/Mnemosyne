@@ -14,6 +14,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
 
     let lang = state.current_lang.as_deref().unwrap_or("Plain Text");
 
+    let total_lines = state.cached_diff.len();
+    let scroll_line = state.scroll_offset as usize;
+
     let mut title_spans = vec![
         Span::raw(" DIFF — "),
         Span::styled(
@@ -44,7 +47,15 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
                 .bg(theme.diff_del_bg),
         ));
     }
-    title_spans.push(Span::raw(" "));
+
+    if total_lines > 0 {
+        title_spans.push(Span::styled(
+            format!(" {}:{} ", scroll_line + 1, total_lines),
+            ratatui::style::Style::default().fg(theme.text_dim),
+        ));
+    } else {
+        title_spans.push(Span::raw(" "));
+    }
 
     let block = ZedBlock::default(
         theme,
@@ -58,10 +69,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &mut AppState) {
 
     let scroll = (state.scroll_offset.min(u16::MAX as u32) as u16, 0);
 
-    let preview = Paragraph::new(state.cached_diff.clone())
+    if state.cached_diff.is_empty() {
+        let empty = Paragraph::new(Line::from(vec![Span::styled(
+            "No diff available. Select a snapshot from the timeline.",
+            ratatui::style::Style::default().fg(theme.text_dim),
+        )]))
         .block(block)
-        .scroll(scroll)
-        .wrap(Wrap { trim: false });
-
-    f.render_widget(preview, area);
+        .alignment(ratatui::layout::Alignment::Center);
+        f.render_widget(empty, area);
+    } else {
+        let preview = Paragraph::new(state.cached_diff.clone())
+            .block(block)
+            .scroll(scroll)
+            .wrap(Wrap { trim: false });
+        f.render_widget(preview, area);
+    }
 }
